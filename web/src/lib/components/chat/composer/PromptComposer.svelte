@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { onMount, onDestroy, tick, untrack } from 'svelte';
+	import ComposerDraftPreview from './ComposerDraftPreview.svelte';
+	import { PromptComposerMarkdownController } from './prompt-composer-markdown-controller.js';
 	import { contentSizedTextarea } from '$lib/components/ui/textarea/content-sized-textarea.svelte.js';
 	import FileMentionMenu from './FileMentionMenu.svelte';
 	import SlashCommandMenu from './SlashCommandMenu.svelte';
@@ -137,6 +139,30 @@
 	const workspaceShortcuts = getWorkspaceShortcuts();
 	const projectResolution = getProjectResolution();
 	const ui = new PromptComposerUiState();
+	const markdownPreviewOpen = $derived(
+		composerState.inputText.length > 0 && ui.markdownPreviewText === composerState.inputText,
+	);
+	const markdown = new PromptComposerMarkdownController({
+		ui,
+		composer: composerState,
+		get chatId() {
+			return sessions.selectedChatId;
+		},
+		get textarea() {
+			return textarea;
+		},
+		get canPreview() {
+			return (
+				isVisible && isPresented && !isDisabled && !promptTransformPending && !ui.composerEditorOpen
+			);
+		},
+		get visible() {
+			return isVisible;
+		},
+		get interactionGeneration() {
+			return workspaceShortcuts.userInteractionGeneration;
+		},
+	});
 	const promptRecall = new PromptComposerRecallController({
 		getIdentity: () => recallIdentity,
 		getPrompts: () => recallPrompts,
@@ -246,6 +272,7 @@
 	onDestroy(() => onAvailabilityNoticeChange?.(null));
 
 	function requestComposerFocusForChat(chatId: string | null): void {
+		markdown.reset();
 		focusDelivery.request(
 			chatId,
 			untrack(() => workspaceShortcuts.userInteractionGeneration),
@@ -278,6 +305,10 @@
 		},
 	});
 	const promptTransformPending = $derived(snippetExpansion.pending || promptRefinement.pending);
+	function handleRefinePrompt(): void {
+		markdown.reset();
+		promptRefinement.handleAction();
+	}
 	$effect(() => {
 		executionKey;
 		return () => {
@@ -306,6 +337,7 @@
 		const chatId = sessions.selectedChatId;
 		const changed = ui.resetOnChatSwitch(chatId);
 		if (!changed) return;
+		markdown.reset();
 		snippetExpansion.cancel();
 		promptRefinement.abort();
 		attachmentController.resetDrag();
@@ -355,6 +387,7 @@
 
 	onDestroy(() => {
 		destroyed = true;
+		markdown.destroy();
 		projectState.destroy();
 		snippetExpansion.cancel();
 		promptRefinement.destroy();
@@ -444,7 +477,8 @@
 
 	function returnComposerFocus(): void {
 		if (destroyed || !isVisible) return;
-		textarea?.focus({ preventScroll: true });
+		if (markdownPreviewOpen) void markdown.edit();
+		else textarea?.focus({ preventScroll: true });
 	}
 
 	async function settleComposerAfterSnippet(caret?: number): Promise<void> {
@@ -611,11 +645,13 @@
 			void expandSnippetInvocation(command);
 			return;
 		}
+		if (markdownPreviewOpen) void markdown.edit();
 		if (action === 'steer-preferred') onSteerPreferredSubmit();
 		else onsubmit();
 	}
 
 	function handleInput(event: Event) {
+		markdown.reset();
 		promptRecall.reset();
 		const target = event.currentTarget as HTMLTextAreaElement;
 		if (isDisabled || promptRefinement.pending) {
@@ -633,6 +669,7 @@
 			conversationInput ? 'conversation' : 'literal',
 		);
 		queueCurrentDraft(value);
+		if ((event as InputEvent).inputType === 'insertFromPaste') markdown.previewPaste(value);
 	}
 	const selectedIsProcessing = $derived(isChatProcessing(sessions.selectedChat));
 	const thinkingReducedMotion = $derived(selectedIsProcessing && localSettings.reduceMotion);
@@ -718,6 +755,7 @@
 		ondragover={(event) => attachmentController.handleDragOver(event)}
 		ondragleave={(event) => attachmentController.handleDragLeave(event)}
 		ondrop={(event) => attachmentController.handleDrop(event)}
+		onpaste={(event) => attachmentController.handlePaste(event)}
 		{@attach attachProcessingPulse}
 		{@attach snippetExpansion.pending && snippetExpansionLayer}
 		{@attach promptRefinement.pending &&
@@ -813,7 +851,14 @@
 			/>
 
 			<div class="relative overflow-hidden bg-transparent focus-within:ring-0">
-				<div class="relative z-10">
+				{#if markdownPreviewOpen}
+					<ComposerDraftPreview
+						source={composerState.inputText}
+						onEdit={() => void markdown.edit()}
+						onSubmitKeydown={handleKeyDown}
+					/>
+				{/if}
+				<div class="relative z-10" hidden={markdownPreviewOpen}>
 					<textarea
 						{@attach contentSizing}
 						rows="1"
@@ -822,7 +867,6 @@
 						onkeydown={handleKeyDown}
 						onpointerdown={() => promptRecall.reset()}
 						oninput={handleInput}
-						onpaste={(event) => attachmentController.handlePaste(event)}
 						placeholder={m.chat_composer_reply_placeholder()}
 						disabled={isDisabled}
 						readonly={promptRefinement.pending}
@@ -833,11 +877,14 @@
 
 			<ComposerBottomBar
 				canAttachImages={canAttachAttachments}
+				onPreviewMarkdown={composerState.inputText.trim() && !markdownPreviewOpen
+					? () => markdown.open()
+					: undefined}
 				attachImagesTooltip={m.chat_composer_image_attachments_unavailable()}
 				onAddImage={() => attachmentController.pick()}
 				onOpenSnippetPalette={() => ui.snippetPalette.openFromMenu()}
 				onOpenExpandedEditor={() => expandedEditor?.open()}
-				onRefinePrompt={() => promptRefinement.handleAction()}
+				onRefinePrompt={handleRefinePrompt}
 				canRefinePrompt={promptRefinement.canStart}
 				isPromptRefinementPending={promptRefinement.pending}
 				addMenuDisabled={isDisabled}
@@ -934,6 +981,6 @@
 	{promptTransformPending}
 	isPromptRefinementPending={promptRefinement.pending}
 	canRefinePrompt={promptRefinement.canStart}
-	onRefinePrompt={() => promptRefinement.handleAction()}
+	onRefinePrompt={handleRefinePrompt}
 	openRequestId={composerEditorOpenRequestId}
 />
