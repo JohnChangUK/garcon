@@ -5,6 +5,7 @@
 	import { setCanonicalWorkspaceLayout } from '../../__tests__/workspace-layout-test-context.js';
 	import {
 		setAppShell,
+		setNewChatPromptDrafts,
 		setModelCatalog,
 		setLocalSettings,
 		setRemoteSettings,
@@ -15,6 +16,7 @@
 		setTransientLayers,
 	} from '$lib/context';
 	import { createRemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
+	import { NewChatPromptDraftStore } from '$lib/chat/new-chat/new-chat-prompt-draft.js';
 	import type { NewChatConfig } from '$lib/chat/sessions/chat-session-types.js';
 	import type { PreamblesSnapshot } from '$shared/preambles';
 	import type { ChatId } from '$shared/chat-id';
@@ -117,6 +119,7 @@
 		},
 	} as never;
 	setAppShell(appShell);
+	setNewChatPromptDrafts(new NewChatPromptDraftStore());
 	const transientLayers = new TransientLayerRegistry(new WorkspaceInteractionGate());
 	setTransientLayers(transientLayers);
 

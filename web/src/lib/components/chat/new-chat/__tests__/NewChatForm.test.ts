@@ -237,6 +237,7 @@ describe('NewChatForm', () => {
 	});
 
 	afterEach(() => {
+		localStorage.clear();
 		vi.unstubAllGlobals();
 		vi.mocked(snippetsApi.expandSnippet).mockReset();
 		vi.mocked(clientChatId.createClientChatId).mockReset();
