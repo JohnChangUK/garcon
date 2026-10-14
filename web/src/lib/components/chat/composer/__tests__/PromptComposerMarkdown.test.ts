@@ -1,7 +1,10 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import PromptComposerTestHost from './PromptComposerTestHost.svelte';
-import { parseComposerMarkdownInWorker, serializeComposerMarkdownPasteInWorker } from '../composer-markdown-worker.js';
+import {
+	parseComposerMarkdownInWorker,
+	serializeComposerMarkdownPasteInWorker,
+} from '../composer-markdown-worker.js';
 import {
 	parseComposerMarkdown,
 	serializeComposerMarkdownPaste,
@@ -49,7 +52,6 @@ async function formatted({
 	});
 	const textarea = screen.getByRole<HTMLTextAreaElement>('textbox');
 	await fireEvent.input(textarea, { target: { value: source } });
-	await fireEvent.click(await screen.findByRole('button', { name: 'Format Markdown' }));
 	const editor = await screen.findByRole('textbox', { name: 'Formatted message' });
 	return { ...rendered, textarea, editor, onsubmit };
 }
@@ -82,23 +84,31 @@ describe('formatted composer integration', () => {
 		const rich = richEditor(editor);
 		let position = 0;
 		rich.state.doc.descendants((node, offset) => {
-			if (node.type.name === 'text' && node.text === 'max_tokens') position = offset + node.nodeSize;
+			if (node.type.name === 'text' && node.text === 'max_tokens')
+				position = offset + node.nodeSize;
 		});
 		rich.commands.insertContentAt(position, '_limit');
-		const edited = prompt.replace('| - | - |\n| max_tokens |', '| --- | --- |\n| max_tokens_limit |');
+		const edited = prompt.replace(
+			'| - | - |\n| max_tokens |',
+			'| --- | --- |\n| max_tokens_limit |',
+		);
 		await waitFor(() => expect(textarea.value).toBe(edited));
 		rich.commands.undo();
 		await waitFor(() => expect(textarea.value).toBe(prompt));
 	});
 	it('shows a restored table draft formatted and leaves other restored drafts in source', async () => {
-		vi.mocked(parseComposerMarkdownInWorker).mockResolvedValue(parseComposerMarkdown({ source: table }));
-		render(PromptComposerTestHost, { selectedChatId: 'markdown-restore', selectedStatus: 'running' });
+		vi.mocked(parseComposerMarkdownInWorker).mockResolvedValue(
+			parseComposerMarkdown({ source: table }),
+		);
+		render(PromptComposerTestHost, {
+			selectedChatId: 'markdown-restore',
+			selectedStatus: 'running',
+		});
 		const textarea = screen.getByRole<HTMLTextAreaElement>('textbox');
 		await fireEvent.input(textarea, { target: { value: 'plain notes' } });
 		await fireEvent.click(screen.getByTestId('restore-draft'));
 		expect(parseComposerMarkdownInWorker).not.toHaveBeenCalled();
 		await fireEvent.input(textarea, { target: { value: table } });
-		expect(screen.queryByRole('textbox', { name: 'Formatted message' })).toBeNull();
 		await fireEvent.click(screen.getByTestId('restore-draft'));
 		await screen.findByRole('textbox', { name: 'Formatted message' });
 		expect(textarea.value).toBe(table);
@@ -120,6 +130,59 @@ describe('formatted composer integration', () => {
 		expect(textarea.value).toBe(source);
 		expect(screen.queryByRole('button', { name: 'Edit Markdown source' })).toBeNull();
 		expect(screen.queryByRole('button', { name: 'Format Markdown' })).toBeNull();
+	});
+	it.each([
+		['sh', false],
+		['notes-markdown', true],
+	])('formats literal input in mode %s only when it declares Markdown', async (model, formats) => {
+		vi.mocked(parseComposerMarkdownInWorker).mockImplementation(async (request) =>
+			parseComposerMarkdown(request),
+		);
+		const props = {
+			selectedChatId: 'markdown-literal',
+			executionPolicy: 'literal' as const,
+			inputFormatByModel: { 'notes-markdown': 'markdown' as const },
+		};
+		const { rerender } = render(PromptComposerTestHost, { ...props, model });
+		const textarea = screen.getByRole<HTMLTextAreaElement>('textbox');
+		const source = "printf '%s\\n' _target_";
+		await fireEvent.input(textarea, { target: { value: source } });
+		if (formats) {
+			const editor = await screen.findByRole('textbox', { name: 'Formatted message' });
+			expect(editor.querySelector('em')?.textContent).toBe('target');
+			// A mode that takes its input verbatim gets the draft back exactly as typed.
+			await rerender({ ...props, model: 'sh' });
+			await waitFor(() =>
+				expect(screen.queryByRole('textbox', { name: 'Formatted message' })).toBeNull(),
+			);
+		} else {
+			await new Promise((done) => setTimeout(done, 300));
+			expect(parseComposerMarkdownInWorker).not.toHaveBeenCalled();
+			expect(screen.queryByRole('textbox', { name: 'Formatted message' })).toBeNull();
+		}
+		expect(textarea.value).toBe(source);
+	});
+	it('opens the snippet palette for a trigger typed after formatted content', async () => {
+		const source = '**context** then';
+		const { editor, textarea } = await formatted({ source });
+		vi.mocked(snippetsApi.expandSnippet).mockResolvedValue({
+			success: true,
+			source: 'snippet',
+			sourceId: 'snippet-review',
+			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
+			shortName: 'review',
+			contextExecutorId: 'local',
+			contextProjectPath: '/workspace/project',
+			expandedText: 'appended',
+		});
+		richEditor(editor).chain().focus('end').insertContent(' ;;').run();
+		await waitFor(() =>
+			expect(screen.queryByRole('textbox', { name: 'Formatted message' })).toBeNull(),
+		);
+		expect(textarea.value).toBe(source + ' ;;');
+		expect(textarea.selectionStart).toBe(source.length + 3);
+		await fireEvent.click(await screen.findByRole('option', { name: /^review/ }));
+		await waitFor(() => expect(textarea.value).toBe(source + ' appended'));
 	});
 	it('returns to the plain editor when a formatted draft is emptied', async () => {
 		const { editor, textarea } = await formatted();
@@ -171,13 +234,15 @@ describe('formatted composer integration', () => {
 			expect(screen.queryByRole('textbox', { name: 'Formatted message' })).toBeNull(),
 		);
 		expect(textarea.value).toBe(table + '\n\nAppended review block');
-		expect(screen.getByRole('button', { name: 'Format Markdown' })).toBeTruthy();
+		expect(screen.queryByRole('button', { name: 'Format Markdown' })).toBeNull();
 	});
 	it('does not submit a replayed Enter that lost its Shift modifier', async () => {
 		const { editor, onsubmit } = await formatted();
 		const rich = richEditor(editor);
 		// iOS delivers the real key event to the DOM and replays it to key handlers without modifiers.
-		editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', shiftKey: true, bubbles: true }));
+		editor.dispatchEvent(
+			new KeyboardEvent('keydown', { key: 'Shift', shiftKey: true, bubbles: true }),
+		);
 		const replayed = new KeyboardEvent('keydown', { key: 'Enter', cancelable: true });
 		rich.view.someProp('handleKeyDown', (handler) => handler(rich.view, replayed));
 		expect(onsubmit).not.toHaveBeenCalled();
@@ -274,7 +339,9 @@ describe('formatted composer integration', () => {
 		await fireEvent.paste(editor, { clipboardData: transfer });
 		await waitFor(() => expect(textarea.value).toBe(table + '\n\n' + text));
 		expect(screen.queryByRole('textbox', { name: 'Formatted message' })).toBeNull();
-		expect(screen.getByTestId('notification').textContent).toContain('cannot use formatted editing');
+		expect(screen.getByTestId('notification').textContent).toContain(
+			'cannot use formatted editing',
+		);
 	});
 	it.each(['paste', 'drop'])(
 		'keeps oversized %s text in source before HTML parsing',
@@ -314,7 +381,9 @@ describe('formatted composer integration', () => {
 	it('waits for oversized paste before allowing keyboard or button submission', async () => {
 		let resolve!: (source: string) => void;
 		vi.mocked(serializeComposerMarkdownPasteInWorker).mockReturnValueOnce(
-			new Promise((done) => { resolve = done; }),
+			new Promise((done) => {
+				resolve = done;
+			}),
 		);
 		const { editor, textarea, onsubmit } = await formatted();
 		const transfer = new DataTransfer();

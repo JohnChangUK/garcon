@@ -53,17 +53,62 @@ test("editable Markdown tables preserve drafts, focus, submission, and responsiv
         });
         await page.screenshot({ path: join(artifacts, name) });
       };
-      // Emptying a formatted draft is the way back to the plain editor.
+      // Empties the backing textarea in one step, so a conversion that lands meanwhile cannot
+      // hide the control being cleared; any formatted view of the old draft is dropped.
       const clear = async () => {
-        if (await editor.isVisible()) {
-          await editor.focus();
-          await page.keyboard.press("Control+A");
-          await page.keyboard.press("Backspace");
-        } else await textarea.fill("");
+        await textarea.evaluate((element: HTMLTextAreaElement) => {
+          element.value = "";
+          element.dispatchEvent(new Event("input", { bubbles: true }));
+        });
         await browserExpect(textarea).toBeVisible();
         await browserExpect(textarea).toHaveValue("");
+        await textarea.focus();
       };
       const prose = "Ship **two** things:\n\n1. first\n2. second\n\n- [ ] follow up";
+      for (const width of [1440, 390]) {
+        await page.setViewportSize({ width, height: 900 });
+        await clear();
+        await textarea.focus();
+        await page.keyboard.type("Ship **two**");
+        await browserExpect(editor).toBeFocused();
+        await browserExpect(editor.locator("strong")).toHaveText("two");
+        await page.keyboard.type(" and **three** now");
+        await browserExpect(editor.locator("strong")).toHaveCount(2);
+        await browserExpect(textarea).toHaveValue("Ship **two** and **three** now");
+        await page.keyboard.press("Shift+Enter");
+        await page.keyboard.press("Shift+Enter");
+        await page.keyboard.type("| Name | Value |");
+        await page.keyboard.press("Shift+Enter");
+        await page.keyboard.type("| --- | --- |");
+        await browserExpect(editor.locator("table")).toHaveCount(1);
+        await page.keyboard.press("Tab");
+        await page.keyboard.type("Synthetic item");
+        await page.keyboard.press("Tab");
+        await page.keyboard.type("Ready");
+        await browserExpect(editor.locator("td")).toHaveCount(2);
+        await browserExpect(textarea).toHaveValue(/Ship \*\*two\*\* and \*\*three\*\* now[\s\S]*Synthetic item.*Ready/);
+        await screenshot(`composer-live-markdown-${width}.png`);
+        await clear();
+        await page.keyboard.type(`1. first ${width}`);
+        await browserExpect(editor).toBeFocused();
+        await page.keyboard.press("Shift+Enter");
+        await page.keyboard.type("second");
+        await browserExpect(editor.locator("ol > li")).toHaveCount(2);
+        await browserExpect(textarea).toHaveValue(`1. first ${width}\n2. second`);
+        const typed = await textarea.inputValue();
+        if (width === 390) await page.getByRole("button", { name: "Send message", exact: true }).click();
+        else await editor.press("Enter");
+        await integration.client.waitForCommittedUserInput(ids[0], typed);
+        await browserExpect(textarea).toHaveValue("");
+        await integration.client.waitForProcessing(ids[0], false);
+        await page.keyboard.type("| Name | Value |");
+        await page.keyboard.press("Shift+Enter");
+        await page.keyboard.type("| --- | --- |");
+        await browserExpect(editor.locator("table")).toHaveCount(1);
+        await browserExpect(page.getByRole("button", { name: "Format Markdown" })).toHaveCount(0);
+      }
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await clear();
       await textarea.focus();
       await paste(prose);
       await browserExpect(editor).toBeFocused();
@@ -137,13 +182,8 @@ test("editable Markdown tables preserve drafts, focus, submission, and responsiv
         await browserExpect(textarea).toHaveValue(/`a  b`/);
         const edited = await textarea.inputValue();
         await clear();
-        await browserExpect(textarea).toBeFocused();
         if (width === 390) {
           await textarea.fill(edited);
-          await page
-            .getByRole("button", { name: "More composer actions" })
-            .click();
-          await page.getByRole("menuitem", { name: "Format Markdown" }).click();
           await browserExpect(editor).toBeVisible();
           await browserExpect(editor).toBeFocused();
           await editor.locator("td").first().locator("p").click();
@@ -197,8 +237,57 @@ test("editable Markdown tables preserve drafts, focus, submission, and responsiv
       await browserExpect(textarea).toHaveValue(
         beforeSnippet + " appended snippet",
       );
-      await textarea.fill(table);
+      // A trigger typed after formatted content opens the palette, which replaces it in source.
+      await clear();
       await textarea.focus();
+      await page.keyboard.type("**context**");
+      await browserExpect(editor).toBeFocused();
+      await browserExpect(editor.locator("strong")).toHaveText("context");
+      await page.keyboard.type(" ;;");
+      const palette = page.getByRole("dialog", {
+        name: "Insert Snippet",
+        exact: true,
+      });
+      await browserExpect(palette).toBeVisible();
+      await browserExpect(editor).toHaveCount(0);
+      await browserExpect(textarea).toHaveValue("**context** ;;");
+      await page.keyboard.type("rev");
+      await palette.getByRole("option", { name: /^review/ }).click();
+      await browserExpect(textarea).toHaveValue(
+        "**context**  appended snippet",
+      );
+      // Syntax paused partway through stays in source until it is finished.
+      await clear();
+      await textarea.focus();
+      await page.keyboard.type("**Note*");
+      await page.waitForTimeout(600);
+      await browserExpect(editor).toHaveCount(0);
+      await page.keyboard.type("*");
+      await browserExpect(editor.locator("strong")).toHaveText("Note");
+      await browserExpect(textarea).toHaveValue("**Note**");
+      // Written delimiters and references survive an edit of their paragraph.
+      await clear();
+      await textarea.focus();
+      await page.keyboard.type("edit __init__.py and &lt; in _private_");
+      await browserExpect(editor.locator("strong")).toHaveText("init");
+      await page.keyboard.type(" now");
+      await browserExpect(textarea).toHaveValue(
+        "edit __init__.py and &lt; in _private_ now",
+      );
+      await clear();
+      await textarea.focus();
+      await page.keyboard.type("my_var is broken:");
+      await page.keyboard.press("Shift+Enter");
+      await page.keyboard.type("-");
+      await page.waitForTimeout(600);
+      await browserExpect(editor).toHaveCount(0);
+      await page.keyboard.type(" first item");
+      await browserExpect(editor.locator("ul > li")).toHaveText("first item");
+      await browserExpect(textarea).toHaveValue(
+        "my_var is broken:\n- first item",
+      );
+      await clear();
+      await textarea.fill("plain notes");
       await paste("\nplain notes");
       await browserExpect(editor).toHaveCount(0);
       await browserExpect(textarea).toBeFocused();
@@ -323,3 +412,84 @@ test("editable Markdown tables preserve drafts, focus, submission, and responsiv
     },
   );
 }, 180_000);
+
+test("literal Shell input is formatted only in a mode that declares Markdown input", async () => {
+  await withChromiumFixture(
+    "composer-markdown-literal",
+    async ({ page, integration, assertNoBrowserErrors }) => {
+      const { client, executionDirs } = integration;
+      const start = async (model: string, command: string) => {
+        const chatId = integration.newChatId();
+        const started = await client.startChat({
+          chatId,
+          agentId: "shell",
+          model,
+          projectPath: executionDirs.project,
+          permissionMode: "default",
+          thinkingMode: "none",
+          agentSettings: { ownerId: "shell", schemaVersion: 1, values: {} },
+          origin: "interactive",
+          clientRequestId: crypto.randomUUID(),
+          clientMessageId: crypto.randomUUID(),
+          command,
+        });
+        await client.waitForTurnTerminal(chatId, started.turnId);
+        await client.waitForProcessing(chatId, false);
+        return chatId;
+      };
+      const commandChat = await start("sh", "printf 'synthetic start'");
+      const notesChat = await start("notes-markdown", "Synthetic note");
+      const textarea = page.locator("[data-composer] textarea");
+      const editor = page.getByRole("textbox", { name: "Formatted message" });
+      const selectChat = async (id: string) => {
+        await page
+          .locator(`[data-sidebar-virtual-row="${id}"]`)
+          .locator("button")
+          .first()
+          .click();
+        await page.waitForURL(`**/chat/${id}`);
+      };
+
+      await page.goto(`${integration.garcon.baseUrl}/chat/${commandChat}`);
+      await textarea.focus();
+      const command = "printf '%s\\n' _target_";
+      await page.keyboard.type(command);
+      // Conversion would start 150 ms after typing settles.
+      await page.waitForTimeout(600);
+      await browserExpect(editor).toHaveCount(0);
+      await page.keyboard.type(" __init__.py");
+      await page.waitForTimeout(600);
+      await browserExpect(editor).toHaveCount(0);
+      await browserExpect(textarea).toHaveValue(`${command} __init__.py`);
+
+      // A restored draft follows the mode of the chat it belongs to.
+      await selectChat(notesChat);
+      await browserExpect(textarea).toHaveValue("");
+      await page.keyboard.type("Keep **this** and _target_");
+      await browserExpect(editor).toBeFocused();
+      await browserExpect(editor.locator("strong")).toHaveText("this");
+      await browserExpect(editor.locator("em")).toHaveText("target");
+      await selectChat(commandChat);
+      await browserExpect(editor).toHaveCount(0);
+      await browserExpect(textarea).toHaveValue(`${command} __init__.py`);
+      await selectChat(notesChat);
+      await browserExpect(editor.locator("strong")).toHaveText("this");
+      await selectChat(commandChat);
+      await browserExpect(editor).toHaveCount(0);
+
+      await textarea.press("Enter");
+      await browserExpect(textarea).toHaveValue("");
+      await browserExpect
+        .poll(async () =>
+          (await client.getMessages(commandChat)).messages.flatMap((row) =>
+            row.message.type === "user-message" ? [row.message.content] : [],
+          ),
+        )
+        .toContain(`${command} __init__.py`);
+      await browserExpect(
+        page.locator(".markdown-code-block pre").filter({ hasText: "_target_" }),
+      ).toBeVisible();
+      assertNoBrowserErrors();
+    },
+  );
+}, 120_000);

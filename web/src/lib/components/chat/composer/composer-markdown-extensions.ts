@@ -3,7 +3,26 @@ import { Table, TableKit } from '@tiptap/extension-table';
 import Image from '@tiptap/extension-image';
 import TaskList from '@tiptap/extension-task-list';
 import TaskItem from '@tiptap/extension-task-item';
-import { Extension } from '@tiptap/core';
+import {
+	Bold,
+	starInputRegex as boldStarInputRegex,
+	underscoreInputRegex as boldUnderscoreInputRegex,
+} from '@tiptap/extension-bold';
+import {
+	Italic,
+	starInputRegex as italicStarInputRegex,
+	underscoreInputRegex as italicUnderscoreInputRegex,
+} from '@tiptap/extension-italic';
+import { Strike } from '@tiptap/extension-strike';
+import { HardBreak } from '@tiptap/extension-hard-break';
+import {
+	Extension,
+	markInputRule,
+	type JSONContent,
+	type MarkdownParseHelpers,
+	type MarkdownRendererHelpers,
+	type MarkdownToken,
+} from '@tiptap/core';
 
 // The stock renderer always writes a three-backtick fence, which a body line of three or more
 // backticks would close early. The serializer hands code blocks to this renderer instead.
@@ -17,6 +36,65 @@ const DraftCodeBlock = Extension.create({
 		const fence = '`'.repeat(Math.max(3, longest + 1));
 		return `${fence}${language}\n${text}\n${fence}`;
 	},
+});
+
+// Emphasis keeps the delimiter it was written with, so an identifier such as `__init__.py` is
+// not rewritten to `**init**.py` when its block is edited.
+function writtenDelimiter(name: string, stock: string, alternate: string) {
+	return {
+		addAttributes: () => ({ delimiter: { default: null, rendered: false } }),
+		parseMarkdown: (token: MarkdownToken, helpers: MarkdownParseHelpers) =>
+			helpers.applyMark(
+				name,
+				helpers.parseInline(token.tokens ?? []),
+				token.raw?.startsWith(alternate) && !token.raw.startsWith(stock)
+					? { delimiter: alternate }
+					: undefined,
+			),
+		renderMarkdown(node: JSONContent, helpers: MarkdownRendererHelpers) {
+			const delimiter = node.attrs?.delimiter === alternate ? alternate : stock;
+			return `${delimiter}${helpers.renderChildren(node)}${delimiter}`;
+		},
+	};
+}
+
+const DraftBold = Bold.extend({
+	...writtenDelimiter('bold', '**', '__'),
+	addInputRules() {
+		return [
+			markInputRule({ find: boldStarInputRegex, type: this.type }),
+			markInputRule({
+				find: boldUnderscoreInputRegex,
+				type: this.type,
+				getAttributes: { delimiter: '__' },
+			}),
+		];
+	},
+});
+
+const DraftItalic = Italic.extend({
+	...writtenDelimiter('italic', '*', '_'),
+	addInputRules() {
+		return [
+			markInputRule({ find: italicStarInputRegex, type: this.type }),
+			markInputRule({
+				find: italicUnderscoreInputRegex,
+				type: this.type,
+				getAttributes: { delimiter: '_' },
+			}),
+		];
+	},
+});
+
+const DraftStrike = Strike.extend(writtenDelimiter('strike', '~~', '~'));
+
+// Records a break written as `<br>`, which prose keeps as written and a table cell requires.
+const DraftHardBreak = HardBreak.extend({
+	addAttributes: () => ({ html: { default: false, rendered: false } }),
+	parseMarkdown: (token) => ({
+		type: 'hardBreak',
+		...(token.raw?.startsWith('<') ? { attrs: { html: true } } : {}),
+	}),
 });
 
 // Draft resources remain visible as text without fetching or navigating them.
@@ -63,11 +141,19 @@ const DraftTable = Table.extend({
 export function composerMarkdownEditorExtensions() {
 	return [
 		StarterKit.configure({
-			link: { openOnClick: false, autolink: false, linkOnPaste: false },
+			link: { openOnClick: false, autolink: false, linkOnPaste: false, markdownLinks: true },
 			trailingNode: false,
 			// Its `++text++` syntax would swallow increments such as `i++ and j++`.
 			underline: false,
+			bold: false,
+			italic: false,
+			strike: false,
+			hardBreak: false,
 		}),
+		DraftBold,
+		DraftItalic,
+		DraftStrike,
+		DraftHardBreak,
 		DraftCodeBlock,
 		TableKit.configure({ table: false }),
 		DraftTable.configure({ resizable: false }),

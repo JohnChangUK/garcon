@@ -1,8 +1,11 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { Editor, resolveFocusPosition, type JSONContent } from '@tiptap/core';
+	import { TextSelection } from '@tiptap/pm/state';
 	import { MarkdownManager } from '@tiptap/markdown';
 	import { composerMarkdownEditorExtensions } from './composer-markdown-extensions.js';
+	import { composerMarkdownTableInput } from './composer-markdown-table-input.js';
+	import { composerMarkdownCaretMarks } from './composer-markdown-caret-marks.js';
 	import { MAX_COMPOSER_MARKDOWN_LENGTH } from './composer-markdown-limits.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import { createRandomId } from '$lib/utils/random-id.js';
@@ -12,7 +15,8 @@
 		findFileMentionTrigger,
 		formatFileMentionPath,
 	} from '$lib/chat/composer/file-mentions.js';
-	import { serializeComposerMarkdown } from './composer-markdown.js';
+	import { findSnippetTrigger } from '$lib/chat/composer/snippet-trigger.js';
+	import { configureComposerMarkdown, serializeComposerMarkdown } from './composer-markdown.js';
 	import {
 		joinComposerMarkdownBlocks,
 		planComposerMarkdownBlocks,
@@ -24,9 +28,13 @@
 	let {
 		document: documentContent,
 		sources,
+		selection: initialSelection,
+		selectionMarks,
 		readOnly,
+		snippetTrigger,
 		onChange,
 		onPlain,
+		onSnippet,
 		onEditSource,
 		onSubmitKeydown,
 		onCompletionKeydown,
@@ -36,9 +44,13 @@
 	}: {
 		document: JSONContent;
 		sources: (string | null)[];
+		selection?: number;
+		selectionMarks?: JSONContent['marks'];
 		readOnly: boolean;
+		snippetTrigger: string;
 		onChange: (source: string) => void;
 		onPlain: (text: string, caret: number) => void;
+		onSnippet: (text: string, caret: number) => boolean;
 		onEditSource: () => void;
 		onSubmitKeydown: (event: KeyboardEvent) => void;
 		onCompletionKeydown: (event: KeyboardEvent) => boolean;
@@ -51,6 +63,7 @@
 	onMount(() => {
 		const extensions = composerMarkdownEditorExtensions();
 		const markdown = new MarkdownManager({ extensions });
+		configureComposerMarkdown(markdown);
 		const topLevel = (doc: DocumentNode) =>
 			Array.from({ length: doc.childCount }, (_, index) => doc.child(index));
 		let original: DocumentNode[] = [];
@@ -67,15 +80,41 @@
 		// Records Shift from real key events for the synthetic Enter described below.
 		let shiftHeld = false;
 		let mentionOpen = false;
+		// Inline leaves take one position each, so text offsets line up with document positions.
+		const blockText = (block: DocumentNode) =>
+			block.textBetween(0, block.content.size, undefined, (leaf) =>
+				leaf.type.name === 'hardBreak' ? '\n' : '\ufffc',
+			);
+		const serialize = (doc: DocumentNode) =>
+			joinComposerMarkdownBlocks(blocks(doc), original.length, (nodes) =>
+				serializeComposerMarkdown(markdown, { type: 'doc', content: nodes }),
+			);
+		// `crypto.randomUUID` is unavailable on the plain HTTP origins Garcon supports.
+		const sourceMarker = (prefix: string) => `${prefix}${createRandomId().replaceAll('-', '')}`;
+		// The snippet palette replaces a range of the source, which only the plain editor can
+		// address, so a trigger typed here is located in the source the draft serializes to.
+		const snippetSource = (current: Editor): { text: string; caret: number } | null => {
+			const { selection } = current.state;
+			const head = selection.$from;
+			if (
+				!selection.empty ||
+				!head.parent.isTextblock ||
+				current.view.composing ||
+				!findSnippetTrigger(blockText(head.parent), head.parentOffset, snippetTrigger)
+			)
+				return null;
+			const marker = sourceMarker('garconSnippet');
+			const marked = serialize(current.state.tr.insertText(marker).doc);
+			const caret = marked.indexOf(marker);
+			if (caret < 0) return null;
+			return { text: marked.slice(0, caret) + marked.slice(caret + marker.length), caret };
+		};
 		const reportMention = (current: Editor) => {
 			const { selection } = current.state;
 			const head = selection.$from;
 			const block = head.parent;
 			const inCode = block.type.spec.code || head.marks().some((mark) => mark.type.name === 'code');
-			// Inline leaves take one position each, so text offsets line up with document positions.
-			const text = block.textBetween(0, block.content.size, undefined, (leaf) =>
-				leaf.type.name === 'hardBreak' ? '\n' : '\ufffc',
-			);
+			const text = blockText(block);
 			const trigger =
 				current.isEditable && selection.empty && block.isTextblock && !inCode
 					? findFileMentionTrigger(text, head.parentOffset)
@@ -111,8 +150,7 @@
 				return;
 			}
 			// Carries the bounded selection and its marks into off-thread serialization.
-			// `crypto.randomUUID` is unavailable on the plain HTTP origins Garcon supports.
-			const marker = `garconClipboard${createRandomId().replaceAll('-', '')}`;
+			const marker = sourceMarker('garconClipboard');
 			onLargePaste({
 				blocks: blocks(view.state.tr.insertText(marker, position).doc),
 				originalCount: original.length,
@@ -122,22 +160,43 @@
 		};
 		const mountedEditor = new Editor({
 			element: container,
-			extensions,
+			extensions: [
+				...extensions,
+				composerMarkdownTableInput((source) => markdown.parse(source)),
+				...(initialSelection !== undefined && selectionMarks
+					? [composerMarkdownCaretMarks(initialSelection, selectionMarks)]
+					: []),
+			],
 			content: documentContent,
 			editable: !readOnly,
-			enableInputRules: false,
+			enableInputRules: [
+				'bold',
+				'italic',
+				'strike',
+				'code',
+				'link',
+				'image',
+				'heading',
+				'blockquote',
+				'bulletList',
+				'orderedList',
+				'taskItem',
+				'codeBlock',
+			],
 			enablePasteRules: false,
 			onUpdate: ({ editor: current }) => {
 				const { doc, selection } = current.state;
-				const source = joinComposerMarkdownBlocks(blocks(doc), original.length, (nodes) =>
-					serializeComposerMarkdown(markdown, { type: 'doc', content: nodes }),
-				);
+				const source = serialize(doc);
 				const only = doc.childCount === 1 ? doc.firstChild : null;
 				// With no formatting left the plain editor takes over, where commands and recall work.
 				const plain =
 					only?.type.name === 'paragraph' && only.textContent === source && !current.view.composing;
-				if (plain) onPlain(source, selection.empty ? selection.$from.parentOffset : source.length);
-				else onChange(source);
+				if (plain) {
+					onPlain(source, selection.empty ? selection.$from.parentOffset : source.length);
+					return;
+				}
+				const snippet = snippetSource(current);
+				if (!snippet || !onSnippet(snippet.text, snippet.caret)) onChange(source);
 			},
 			onTransaction: ({ editor: current, transaction }) => {
 				// Typing opens the menu; a restored draft that ends in a mention does not.
@@ -172,7 +231,14 @@
 						onEditSource();
 						return true;
 					}
-					if (event.key === 'Enter') onSubmitKeydown(event);
+					if (event.key === 'Enter') {
+						onSubmitKeydown(event);
+						if (!event.defaultPrevented) {
+							const item = mountedEditor.isActive('taskItem') ? 'taskItem' : 'listItem';
+							if (mountedEditor.isActive(item) && mountedEditor.commands.splitListItem(item))
+								return true;
+						}
+					}
 					return event.defaultPrevented;
 				},
 				handleDOMEvents: {
@@ -215,10 +281,18 @@
 		});
 		editor = mountedEditor;
 		original = topLevel(mountedEditor.state.doc);
-		originalSources =
-			sources.length === original.length ? sources : original.map(() => null);
-		const selection = resolveFocusPosition(mountedEditor.state.doc, 'end');
+		originalSources = sources.length === original.length ? sources : original.map(() => null);
+		const selection =
+			initialSelection === undefined
+				? resolveFocusPosition(mountedEditor.state.doc, 'end')
+				: TextSelection.create(mountedEditor.state.doc, initialSelection);
 		if (selection) mountedEditor.view.dispatch(mountedEditor.state.tr.setSelection(selection));
+		if (selectionMarks)
+			mountedEditor.view.dispatch(
+				mountedEditor.state.tr.setStoredMarks(
+					selectionMarks.map((mark) => mountedEditor.schema.markFromJSON(mark)),
+				),
+			);
 		onReady(mountedEditor.view.dom);
 		return () => mountedEditor.destroy();
 	});

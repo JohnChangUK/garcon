@@ -40,7 +40,9 @@ function fixture() {
 		textarea,
 		chatId: 'one',
 		canFormat: true,
+		acceptsMarkdown: true,
 		interactionGeneration: 0,
+		snippetTrigger: ';;',
 		onChange: vi.fn((text: string) => {
 			composer.inputText = text;
 		}),
@@ -63,11 +65,122 @@ afterEach(() => {
 	vi.resetAllMocks();
 });
 
+describe('formatted composer input format', () => {
+	it('leaves typed, pasted, and restored Markdown as source where Markdown is not accepted', async () => {
+		const { controller, ui, options, paste } = fixture();
+		options.acceptsMarkdown = false;
+		options.textarea.value = table;
+		controller.input(new InputEvent('input', { inputType: 'insertText' }));
+		await new Promise((done) => setTimeout(done, 180));
+		paste(table);
+		controller.restore();
+		await Promise.resolve();
+		expect(parseComposerMarkdownInWorker).not.toHaveBeenCalled();
+		expect(ui.formattedDraft).toBeNull();
+		controller.destroy();
+	});
+	it('abandons a conversion when the model stops accepting Markdown meanwhile', async () => {
+		let resolve!: (document: ComposerMarkdownDocument | null) => void;
+		vi.mocked(parseComposerMarkdownInWorker).mockReturnValue(
+			new Promise((done) => {
+				resolve = done;
+			}),
+		);
+		const { controller, ui, options } = fixture();
+		controller.restore();
+		await vi.waitFor(() => expect(parseComposerMarkdownInWorker).toHaveBeenCalledOnce());
+		options.acceptsMarkdown = false;
+		resolve(parsed);
+		await Promise.resolve();
+		await Promise.resolve();
+		expect(ui.formattedDraft).toBeNull();
+		controller.destroy();
+	});
+});
+
+describe('formatted composer snippet triggers', () => {
+	it('returns a typed trigger to the plain editor at its caret, where the palette opens', async () => {
+		const { controller, ui, options } = fixture();
+		ui.formattedDraft = { source: table, ...parsed };
+		const text = '**context** ;;re';
+		expect(controller.snippet(text, text.length)).toBe(true);
+		expect(options.onChange).toHaveBeenCalledExactlyOnceWith(text);
+		options.textarea.value = text;
+		await vi.waitFor(() =>
+			expect(options.onSourceCaret).toHaveBeenCalledExactlyOnceWith(text, text.length),
+		);
+		expect(ui.formattedDraft).toBeNull();
+		expect(document.activeElement).toBe(options.textarea);
+		controller.destroy();
+	});
+	it('leaves a dismissed trigger and plain prose in the formatted editor', () => {
+		const { controller, ui, options } = fixture();
+		ui.formattedDraft = { source: table, ...parsed };
+		const text = '**context** ;;re';
+		ui.snippetPalette.updateDetectedTrigger({ start: 12, end: 14, query: '' }, '**context** ;;');
+		ui.snippetPalette.dismiss();
+		expect(controller.snippet(text, text.length)).toBe(false);
+		expect(controller.snippet('**context** more', 16)).toBe(false);
+		expect(options.onChange).not.toHaveBeenCalled();
+		expect(ui.formattedDraft).not.toBeNull();
+		controller.destroy();
+	});
+	it('hands over a trigger typed again where a dismissed one was deleted', () => {
+		const { controller, ui } = fixture();
+		ui.formattedDraft = { source: table, ...parsed };
+		ui.snippetPalette.updateDetectedTrigger({ start: 12, end: 14, query: '' }, '**context** ;;');
+		ui.snippetPalette.dismiss();
+		controller.change('**context** ');
+		expect(controller.snippet('**context** ;;', 14)).toBe(true);
+		controller.destroy();
+	});
+});
+
 describe('formatted composer lifecycle', () => {
+	it('formats typed Markdown after typing settles without changing its source', async () => {
+		vi.mocked(parseComposerMarkdownInWorker).mockResolvedValue(parsed);
+		const { controller, ui, options } = fixture();
+		options.composer.inputText = '**bold**';
+		options.textarea.value = '**bold**';
+		options.textarea.setSelectionRange(8, 8);
+		controller.input(new InputEvent('input', { inputType: 'insertText' }));
+		expect(parseComposerMarkdownInWorker).not.toHaveBeenCalled();
+		await vi.waitFor(() => expect(ui.formattedDraft?.source).toBe('**bold**'));
+		expect(parseComposerMarkdownInWorker).toHaveBeenCalledExactlyOnceWith(
+			{ source: '**bold**', pastedText: '**bold**', caret: 8 },
+			expect.any(AbortSignal),
+		);
+		expect(options.onChange).not.toHaveBeenCalled();
+		controller.destroy();
+	});
+	it('defers composition and abandons a conversion when the caret moves', async () => {
+		let resolve!: (document: ComposerMarkdownDocument | null) => void;
+		vi.mocked(parseComposerMarkdownInWorker).mockReturnValue(
+			new Promise((done) => {
+				resolve = done;
+			}),
+		);
+		const { controller, ui, options } = fixture();
+		controller.input(new InputEvent('input', { isComposing: true }));
+		await new Promise((done) => setTimeout(done, 180));
+		expect(parseComposerMarkdownInWorker).not.toHaveBeenCalled();
+		options.textarea.value = table;
+		options.textarea.setSelectionRange(table.length, table.length);
+		controller.input(new InputEvent('input'));
+		await vi.waitFor(() => expect(parseComposerMarkdownInWorker).toHaveBeenCalledOnce());
+		options.textarea.setSelectionRange(1, 1);
+		resolve(parsed);
+		await Promise.resolve();
+		await Promise.resolve();
+		expect(ui.formattedDraft).toBeNull();
+		controller.destroy();
+	});
 	it('applies oversized paste after releasing the shared submission gate', async () => {
 		let resolve!: (text: string) => void;
 		vi.mocked(serializeComposerMarkdownPasteInWorker).mockReturnValue(
-			new Promise((done) => { resolve = done; }),
+			new Promise((done) => {
+				resolve = done;
+			}),
 		);
 		const { ui, options, controller } = fixture();
 		Object.defineProperty(options, 'canFormat', { get: () => !ui.formattedPastePending });
@@ -81,23 +194,34 @@ describe('formatted composer lifecycle', () => {
 		expect(ui.formattedDraft).toBeNull();
 		controller.destroy();
 	});
-	it.each(['null', 'error'])('keeps the pasted text in source and unlocks submission on Worker %s', async (failure) => {
-		if (failure === 'null') vi.mocked(serializeComposerMarkdownPasteInWorker).mockResolvedValue(null);
-		else vi.mocked(serializeComposerMarkdownPasteInWorker).mockRejectedValue(new Error('Worker failed'));
-		const { ui, options, controller } = fixture();
-		ui.formattedDraft = { source: table, ...parsed };
-		await controller.pasteSource(pasteRequest);
-		expect(ui.formattedPastePending).toBe(false);
-		expect(options.composer.inputText).toBe(table + '\n\nlarge');
-		expect(options.onUnavailable).toHaveBeenCalledOnce();
-		expect(ui.formattedDraft).toBeNull();
-		controller.destroy();
-	});
+	it.each(['null', 'error'])(
+		'keeps the pasted text in source and unlocks submission on Worker %s',
+		async (failure) => {
+			if (failure === 'null')
+				vi.mocked(serializeComposerMarkdownPasteInWorker).mockResolvedValue(null);
+			else
+				vi.mocked(serializeComposerMarkdownPasteInWorker).mockRejectedValue(
+					new Error('Worker failed'),
+				);
+			const { ui, options, controller } = fixture();
+			ui.formattedDraft = { source: table, ...parsed };
+			await controller.pasteSource(pasteRequest);
+			expect(ui.formattedPastePending).toBe(false);
+			expect(options.composer.inputText).toBe(table + '\n\nlarge');
+			expect(options.onUnavailable).toHaveBeenCalledOnce();
+			expect(ui.formattedDraft).toBeNull();
+			controller.destroy();
+		},
+	);
 	it('does not unlock a newer paste when an aborted Worker completes', async () => {
 		let resolve!: (text: string) => void;
-		vi.mocked(serializeComposerMarkdownPasteInWorker).mockReturnValueOnce(
-			new Promise((done) => { resolve = done; }),
-		).mockReturnValueOnce(new Promise(() => {}));
+		vi.mocked(serializeComposerMarkdownPasteInWorker)
+			.mockReturnValueOnce(
+				new Promise((done) => {
+					resolve = done;
+				}),
+			)
+			.mockReturnValueOnce(new Promise(() => {}));
 		const { ui, controller } = fixture();
 		ui.formattedDraft = { source: table, ...parsed };
 		const request = pasteRequest;
@@ -216,7 +340,7 @@ describe('formatted composer lifecycle', () => {
 			}),
 		);
 		const { ui, controller } = fixture();
-		controller.open();
+		controller.restore();
 		const button = document.createElement('button');
 		document.body.append(button);
 		button.focus();

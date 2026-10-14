@@ -211,9 +211,7 @@ describe('composer Markdown source preservation', () => {
 		const output = serializeAfterEdit(prompt, (content) =>
 			content.map((node) => (node.type === 'table' ? editFirstCell(node, 'top_p') : node)),
 		);
-		expect(output).toBe(
-			prompt.replace('| - | - |\n| max_tokens |', '| --- | --- |\n| top_p |'),
-		);
+		expect(output).toBe(prompt.replace('| - | - |\n| max_tokens |', '| --- | --- |\n| top_p |'));
 	});
 	it('restores the exact draft when an edit is undone', () => {
 		// Undo yields nodes equal to the parsed ones that are no longer the same objects.
@@ -248,6 +246,12 @@ describe('composer Markdown source preservation', () => {
 		['brackets', 'see [x] and arr[0]'],
 		['an escaped emphasis marker', 'not \\*emphasis\\*'],
 		['an escaped entity', 'literal &amp;lt; text'],
+		['character references', 'Replace &lt; with &amp;, &#60; and &copy;'],
+		['an ampersand in prose', 'AT&T and a & b'],
+		['a line break tag in prose', 'Use flex instead of <br> tags'],
+		['underscore emphasis in an identifier', 'edit __init__.py and _private_ names'],
+		['mixed emphasis delimiters', '__a _b_ c__ then **d** and *e*'],
+		['single-tilde strikethrough', '~~x~~ and ~y~'],
 		['an escaped link', '\\[label](https://x.test)'],
 		['a soft line break', 'line one\nline two'],
 	])('writes %s back as it was typed', (_name, source) => {
@@ -329,6 +333,77 @@ describe('composer Markdown source preservation', () => {
 });
 
 describe('Markdown detection', () => {
+	it('maps a caret after completed bold in the middle of a draft without changing source', () => {
+		const source = 'Before **bold** after';
+		const parsed = parseComposerMarkdown({ source, pastedText: source, caret: 15 })!;
+		expect(parsed.selection).toBe(12);
+		expect(parsed.selectionMarks).toEqual([]);
+		expect(parsed.sources.join('')).toBe(source);
+	});
+	it('preserves the active mark when conversion happens inside bold text', () => {
+		const source = 'Before **bold** after';
+		const parsed = parseComposerMarkdown({ source, pastedText: source, caret: 11 })!;
+		expect(parsed.selection).toBe(10);
+		expect(parsed.selectionMarks).toEqual([{ type: 'bold' }]);
+	});
+	it('places a caret after closing underscores that end the draft', () => {
+		const parsed = parseComposerMarkdown({ source: '__bold__', pastedText: '__bold__', caret: 8 })!;
+		expect(parsed.selection).toBe(5);
+		expect(parsed.selectionMarks).toEqual([]);
+	});
+	it.each([
+		['a bold closer missing its last delimiter', '**Note*'],
+		['an underscore closer missing its last delimiter', 'This is __very important_'],
+		['a list started under a line of text', 'my_var is broken:\n-'],
+		['an underline started under a line of text', 'a_b = c\n='],
+		['a nested list marker', '- one **x**\n  -'],
+		['a quote marker on a new line', '> quote **x**\n>'],
+		['a delimiter row with fewer columns than its header', '| a | b |\n|---|'],
+		['a table row missing its closing pipe', '| a | b |\n|---|---|\n| 1 | 2'],
+		['a table row missing a cell', '| a | b |\n|---|---|\n| 1 |'],
+		['a task marker missing its closing bracket', '- ['],
+		['a task marker missing its space', '- [ ]'],
+		['a checked task marker being typed', '1. [x'],
+	])('keeps %s in source', (_name, source) => {
+		expect(parseComposerMarkdown({ source, pastedText: source, caret: source.length })).toBeNull();
+	});
+	it.each([
+		['x **y**\n\n| a | b |\n|---|---|', 15],
+		['| a | b |\n|---|---|\n| 1 | 2 |', 22],
+	])('takes the caret in the last cell of a table that ends the draft: %j', (source, selection) => {
+		const parsed = parseComposerMarkdown({ source, pastedText: source, caret: source.length })!;
+		expect(parsed.document.content?.at(-1)?.type).toBe('table');
+		expect(parsed.selection).toBe(selection);
+	});
+	it('maps a caret inside a table cell that is followed by more of its row', () => {
+		const source = '| a | b |\n|---|---|\n| 1 | 2 |';
+		expect(parseComposerMarkdown({ source, pastedText: source, caret: 23 })?.selection).toBe(17);
+	});
+	it('formats a completed task marker and a bracket that opens a link label', () => {
+		for (const source of ['- [ ] ', '- [l']) {
+			expect(
+				parseComposerMarkdown({ source, pastedText: source, caret: source.length }),
+			).not.toBeNull();
+		}
+	});
+	it.each(['**bold**\n\n', '**bold**\n', '- item\n\n', '```\ncode\n```', '```\ncode\n```\n'])(
+		'defers a draft whose end has no position in the document: %j',
+		(source) => {
+			expect(parseComposerMarkdown({ source, pastedText: source, caret: source.length })).toBeNull();
+		},
+	);
+	it('places text typed after a closed fence in its own paragraph', () => {
+		const source = '```\ncode\n```\nx';
+		const parsed = parseComposerMarkdown({ source, pastedText: source, caret: source.length })!;
+		expect(parsed.document.content?.map((node) => node.type)).toEqual(['codeBlock', 'paragraph']);
+		expect(parsed.selection).toBe(8);
+	});
+	it.each(['```js\n', '```js\nconst a', 'Intro **x**\n\n```\ncode'])(
+		'keeps code that is still being typed in source: %j',
+		(source) => {
+			expect(parseComposerMarkdown({ source, pastedText: source, caret: source.length })).toBeNull();
+		},
+	);
 	it('screens long input in linear time', () => {
 		const started = performance.now();
 		isMarkdownCandidate(' '.repeat(30_000) + 'x');
