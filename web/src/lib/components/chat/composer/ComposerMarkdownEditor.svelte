@@ -2,21 +2,32 @@
 	import { onMount } from 'svelte';
 	import { Editor, resolveFocusPosition, type JSONContent } from '@tiptap/core';
 	import { TextSelection } from '@tiptap/pm/state';
-	import { MarkdownManager } from '@tiptap/markdown';
+	import { closeHistory } from '@tiptap/pm/history';
+	import { Placeholder } from '@tiptap/extensions/placeholder';
+	import { composerMarkdownCodec } from './composer-markdown-codec.js';
 	import { composerMarkdownEditorExtensions } from './composer-markdown-extensions.js';
 	import { composerMarkdownTableInput } from './composer-markdown-table-input.js';
 	import { composerMarkdownCaretMarks } from './composer-markdown-caret-marks.js';
-	import { MAX_COMPOSER_MARKDOWN_LENGTH } from './composer-markdown-limits.js';
+	import { composerMarkdownEmptyMarks } from './composer-markdown-empty-marks.js';
+	import { composerMarkdownNewline } from './composer-markdown-newline.js';
+	import { ComposerMarkdownCache } from './composer-markdown-cache.js';
+	import {
+		MAX_COMPOSER_MARKDOWN_LENGTH,
+		MAX_COMPOSER_MARKDOWN_NODES,
+	} from './composer-markdown-limits.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import { createRandomId } from '$lib/utils/random-id.js';
-	import type { ComposerMarkdownPasteRequest } from './composer-markdown-parser.js';
+	import type {
+		ComposerMarkdownDocument,
+		ComposerMarkdownPasteRequest,
+	} from './composer-markdown-parser.js';
 	import type { ComposerMarkdownMention } from './prompt-composer-markdown-controller.js';
 	import {
 		findFileMentionTrigger,
 		formatFileMentionPath,
 	} from '$lib/chat/composer/file-mentions.js';
 	import { findSnippetTrigger } from '$lib/chat/composer/snippet-trigger.js';
-	import { configureComposerMarkdown, serializeComposerMarkdown } from './composer-markdown.js';
+	import { findSlashCommandTrigger } from '$lib/chat/composer/slash-commands.js';
 	import {
 		joinComposerMarkdownBlocks,
 		planComposerMarkdownBlocks,
@@ -33,14 +44,15 @@
 		readOnly,
 		snippetTrigger,
 		onChange,
-		onPlain,
+		onSourceAction,
 		onSnippet,
-		onEditSource,
-		onSubmitKeydown,
+		onComposerKeydown,
 		onCompletionKeydown,
 		onReady,
 		onMention,
 		onLargePaste,
+		onMarkdownPaste,
+		onOverflow,
 	}: {
 		document: JSONContent;
 		sources: (string | null)[];
@@ -49,36 +61,44 @@
 		readOnly: boolean;
 		snippetTrigger: string;
 		onChange: (source: string) => void;
-		onPlain: (text: string, caret: number) => void;
+		onSourceAction: (text: string, caret: number) => void;
 		onSnippet: (text: string, caret: number) => boolean;
-		onEditSource: () => void;
-		onSubmitKeydown: (event: KeyboardEvent) => void;
+		onComposerKeydown: (event: KeyboardEvent) => void;
 		onCompletionKeydown: (event: KeyboardEvent) => boolean;
 		onReady: (target: HTMLElement) => void;
 		onMention: (mention: ComposerMarkdownMention | null) => void;
 		onLargePaste: (request: ComposerMarkdownPasteRequest) => void;
+		onMarkdownPaste: (
+			source: string,
+			caret: number,
+			apply: (parsed: ComposerMarkdownDocument) => void,
+		) => void;
+		onOverflow: (source: string) => void;
 	} = $props();
 	let container: HTMLDivElement;
 	let editor: Editor | undefined = $state.raw();
 	onMount(() => {
 		const extensions = composerMarkdownEditorExtensions();
-		const markdown = new MarkdownManager({ extensions });
-		configureComposerMarkdown(markdown);
+		const cache = new ComposerMarkdownCache(composerMarkdownCodec.serialize);
 		const topLevel = (doc: DocumentNode) =>
 			Array.from({ length: doc.childCount }, (_, index) => doc.child(index));
 		let original: DocumentNode[] = [];
 		let originalSources: (string | null)[] = [];
-		const blocks = (doc: DocumentNode): ComposerMarkdownBlock<JSONContent>[] =>
+		// Native history retains fragments; their source baselines avoid lossy reserialization on Undo.
+		const sourceHistory = new WeakMap<
+			DocumentNode['content'],
+			{ original: DocumentNode[]; sources: (string | null)[] }
+		>();
+		const rememberSource = (doc: DocumentNode) => {
+			sourceHistory.set(doc.content, { original, sources: originalSources });
+		};
+		const blocks = (doc: DocumentNode): ComposerMarkdownBlock<DocumentNode>[] =>
 			planComposerMarkdownBlocks(
 				original,
 				originalSources,
 				topLevel(doc),
 				(a, b) => a === b || a.eq(b),
-			).map((block) =>
-				'nodes' in block ? { nodes: block.nodes.map((node) => node.toJSON()) } : block,
 			);
-		// Records Shift from real key events for the synthetic Enter described below.
-		let shiftHeld = false;
 		let mentionOpen = false;
 		// Inline leaves take one position each, so text offsets line up with document positions.
 		const blockText = (block: DocumentNode) =>
@@ -86,9 +106,7 @@
 				leaf.type.name === 'hardBreak' ? '\n' : '\ufffc',
 			);
 		const serialize = (doc: DocumentNode) =>
-			joinComposerMarkdownBlocks(blocks(doc), original.length, (nodes) =>
-				serializeComposerMarkdown(markdown, { type: 'doc', content: nodes }),
-			);
+			joinComposerMarkdownBlocks(blocks(doc), original.length, (nodes) => cache.run(nodes));
 		// `crypto.randomUUID` is unavailable on the plain HTTP origins Garcon supports.
 		const sourceMarker = (prefix: string) => `${prefix}${createRandomId().replaceAll('-', '')}`;
 		// The snippet palette replaces a range of the source, which only the plain editor can
@@ -144,100 +162,152 @@
 				},
 			});
 		};
+		const applyMarkdownPaste = (parsed: ComposerMarkdownDocument) => {
+			if (mountedEditor.isDestroyed || parsed.selection === undefined) return;
+			mountedEditor.setEditable(true, false);
+			const document = mountedEditor.schema.nodeFromJSON(parsed.document);
+			const transaction = closeHistory(mountedEditor.state.tr).replaceWith(
+				0,
+				mountedEditor.state.doc.content.size,
+				document.content,
+			);
+			transaction.setSelection(TextSelection.create(transaction.doc, parsed.selection));
+			transaction.setStoredMarks(
+				(parsed.selectionMarks ?? []).map((mark) => mountedEditor.schema.markFromJSON(mark)),
+			);
+			rememberSource(mountedEditor.state.doc);
+			original = topLevel(transaction.doc);
+			originalSources = parsed.sources;
+			rememberSource(transaction.doc);
+			mountedEditor.view.dispatch(transaction);
+			onReady(mountedEditor.view.dom);
+			const boundary = closeHistory(mountedEditor.state.tr);
+			if (mountedEditor.view.hasFocus()) boundary.scrollIntoView();
+			mountedEditor.view.dispatch(boundary);
+		};
 		const insertText = (view: Editor['view'], text: string, position?: number) => {
-			if (view.state.doc.textContent.length + text.length <= MAX_COMPOSER_MARKDOWN_LENGTH) {
+			const head =
+				position === undefined ? view.state.selection.$from : view.state.doc.resolve(position);
+			let marks = head.marks();
+			if (position === undefined) {
+				const { selection, storedMarks } = view.state;
+				marks =
+					storedMarks ?? (selection.empty ? head.marks() : head.marksAcross(selection.$to) ?? []);
+			}
+			let literal = marks.some((mark) => mark.type.name === 'code');
+			for (let depth = head.depth; depth > 0; depth--) {
+				const node = head.node(depth);
+				if (
+					node.type.spec.code ||
+					node.type.name === 'tableCell' ||
+					node.type.name === 'tableHeader'
+				) {
+					literal = true;
+					break;
+				}
+			}
+			if (!literal) {
+				const marker = sourceMarker('garconClipboard');
+				const marked = serialize(view.state.tr.insertText(marker, position).doc);
+				const start = marked.indexOf(marker);
+				if (start >= 0) {
+					onMarkdownPaste(marked.replace(marker, () => text), start + text.length, applyMarkdownPaste);
+					return;
+				}
+			}
+			if (serialize(view.state.doc).length + text.length <= MAX_COMPOSER_MARKDOWN_LENGTH) {
 				view.dispatch(view.state.tr.insertText(text, position));
 				return;
 			}
 			// Carries the bounded selection and its marks into off-thread serialization.
 			const marker = sourceMarker('garconClipboard');
 			onLargePaste({
-				blocks: blocks(view.state.tr.insertText(marker, position).doc),
+				blocks: blocks(view.state.tr.insertText(marker, position).doc).map((block) =>
+					'nodes' in block ? { nodes: block.nodes.map((node) => node.toJSON()) } : block,
+				),
 				originalCount: original.length,
 				marker,
 				text,
 			});
 		};
-		const mountedEditor = new Editor({
+		const mountedEditor: Editor = new Editor({
 			element: container,
 			extensions: [
 				...extensions,
-				composerMarkdownTableInput((source) => markdown.parse(source)),
+				composerMarkdownEmptyMarks,
+				Placeholder.configure({ placeholder: m.chat_composer_reply_placeholder() }),
+				composerMarkdownTableInput(composerMarkdownCodec.parse),
 				...(initialSelection !== undefined && selectionMarks
 					? [composerMarkdownCaretMarks(initialSelection, selectionMarks)]
 					: []),
 			],
 			content: documentContent,
 			editable: !readOnly,
-			enableInputRules: [
-				'bold',
-				'italic',
-				'strike',
-				'code',
-				'link',
-				'image',
-				'heading',
-				'blockquote',
-				'bulletList',
-				'orderedList',
-				'taskItem',
-				'codeBlock',
-			],
 			enablePasteRules: false,
 			onUpdate: ({ editor: current }) => {
 				const { doc, selection } = current.state;
 				const source = serialize(doc);
+				let nodeCount = 1;
+				doc.descendants(() => {
+					nodeCount++;
+					return nodeCount <= MAX_COMPOSER_MARKDOWN_NODES;
+				});
+				if (
+					source.length > MAX_COMPOSER_MARKDOWN_LENGTH ||
+					nodeCount > MAX_COMPOSER_MARKDOWN_NODES
+				) {
+					onOverflow(source);
+					return;
+				}
 				const only = doc.childCount === 1 ? doc.firstChild : null;
-				// With no formatting left the plain editor takes over, where commands and recall work.
-				const plain =
+				const sourceCommand =
 					only?.type.name === 'paragraph' && only.textContent === source && !current.view.composing;
-				if (plain) {
-					onPlain(source, selection.empty ? selection.$from.parentOffset : source.length);
+				if (
+					sourceCommand &&
+					selection.empty &&
+					findSlashCommandTrigger(source, selection.$from.parentOffset)
+				) {
+					onSourceAction(source, selection.$from.parentOffset);
 					return;
 				}
 				const snippet = snippetSource(current);
 				if (!snippet || !onSnippet(snippet.text, snippet.caret)) onChange(source);
 			},
 			onTransaction: ({ editor: current, transaction }) => {
+				// Runs before onUpdate, including history steps that leave an equal document.
+				const snapshot = sourceHistory.get(current.state.doc.content);
+				if (snapshot) {
+					original = snapshot.original;
+					originalSources = snapshot.sources;
+				} else {
+					rememberSource(current.state.doc);
+				}
 				// Typing opens the menu; a restored draft that ends in a mention does not.
 				if (transaction.docChanged || mentionOpen) reportMention(current);
 			},
 			editorProps: {
-				attributes: {
+				attributes: () => ({
 					role: 'textbox',
+					tabindex: readOnly ? '-1' : '0',
 					'aria-label': m.chat_composer_formatted_markdown(),
 					'aria-multiline': 'true',
-				},
+				}),
 				handleKeyDown(_view, event) {
 					if (readOnly && event.key === 'Enter') {
 						event.preventDefault();
 						return true;
 					}
-					// iOS replays Enter as a synthetic event without modifiers, so Shift+Enter
-					// would read as Enter:
-					// https://github.com/ProseMirror/prosemirror-view/blob/17af0f4b25933933f644a655ad6bb9a0249d7cb5/src/input.ts#L118-L127
-					if (event.key === 'Enter' && !event.isTrusted && shiftHeld && !event.shiftKey) {
-						return false;
-					}
+					if (event.isComposing || _view.composing || event.keyCode === 229) return false;
 					if (onCompletionKeydown(event)) return true;
-					const undo =
-						(event.ctrlKey || event.metaKey) &&
-						!event.shiftKey &&
-						!event.altKey &&
-						event.key.toLowerCase() === 'z';
-					// With no edit to undo, undo steps out of the formatted view to the paste behind it.
-					if (undo && !mountedEditor.can().undo() && !mountedEditor.can().redo()) {
-						event.preventDefault();
-						onEditSource();
-						return true;
+					// Virtual keyboards replay Enter without reliable modifiers. A replay edits,
+					// but never submits or steers:
+					// https://github.com/ProseMirror/prosemirror-view/blob/17af0f4b25933933f644a655ad6bb9a0249d7cb5/src/input.ts#L118-L127
+					if (event.key === 'Enter' && !event.isTrusted) {
+						return mountedEditor.commands.command(composerMarkdownNewline);
 					}
-					if (event.key === 'Enter') {
-						onSubmitKeydown(event);
-						if (!event.defaultPrevented) {
-							const item = mountedEditor.isActive('taskItem') ? 'taskItem' : 'listItem';
-							if (mountedEditor.isActive(item) && mountedEditor.commands.splitListItem(item))
-								return true;
-						}
+					onComposerKeydown(event);
+					if (event.key === 'Enter' && !event.defaultPrevented) {
+						return mountedEditor.commands.command(composerMarkdownNewline);
 					}
 					return event.defaultPrevented;
 				},
@@ -249,11 +319,8 @@
 						return false;
 					},
 					keydown(_view, event) {
-						shiftHeld = event.shiftKey;
-						return false;
-					},
-					keyup(_view, event) {
-						if (event.key === 'Shift') shiftHeld = false;
+						// Leaves native IME input alone without running editor keymaps or preventing it.
+						if (event.isComposing || _view.composing || event.keyCode === 229) return true;
 						return false;
 					},
 					paste(view, event) {
@@ -316,6 +383,13 @@
 	}
 	.composer-markdown-editor :global(p) {
 		margin: 0;
+	}
+	.composer-markdown-editor :global(p.is-editor-empty:first-child::before) {
+		content: attr(data-placeholder);
+		color: hsl(var(--muted-foreground));
+		float: left;
+		height: 0;
+		pointer-events: none;
 	}
 	.composer-markdown-editor :global(.tiptap > * + *) {
 		margin-top: 0.75rem;
