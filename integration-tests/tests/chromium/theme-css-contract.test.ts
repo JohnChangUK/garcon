@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { readFile, readdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { chromium, type Page } from "playwright";
+import { chromium, type Locator, type Page } from "playwright";
 import { THEME_PROFILES } from "../../../web/src/lib/theme/themes";
+import { buttonVariants } from "../../../web/src/lib/components/ui/button/button";
 import { contrastRatio } from "../../support/color-contrast";
 
 const APP_URL = "http://theme-css-contract.test/";
@@ -25,6 +26,58 @@ function diffSyntaxFixture(idPrefix: string): string {
     (className) =>
       `<span id="${idPrefix}-${className}" class="${className}">${className}</span>`,
   ).join(" ");
+}
+
+function focusButtonFixture(): string {
+  const surfaces = [];
+  const variants = [
+    "default",
+    "outline",
+    "secondary",
+    "ghost",
+    "link",
+    "destructive",
+  ] as const;
+  for (const surface of ["background", "card", "popover"]) {
+    const buttons = variants
+      .map(
+        (variant) =>
+          `<button data-focus-probe="${surface} ${variant}" class="${buttonVariants({ variant })}">Focus</button>`,
+      )
+      .join("");
+    surfaces.push(`<div class="bg-${surface}">${buttons}</div>`);
+  }
+  return surfaces.join("");
+}
+
+async function readButtonFocusColors(button: Locator) {
+  return button.evaluate((element) => {
+    const style = getComputedStyle(element);
+    const shadow = style.boxShadow.match(
+      /((?:rgba?|hsla?|oklch|oklab|color)\([^)]*\)) 0px 0px 0px 3px/,
+    )?.[1];
+    if (!shadow) {
+      throw new Error(
+        `Missing ${document.documentElement.dataset.theme} ${element.getAttribute("data-focus-probe")} focus shadow`,
+      );
+    }
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = 1;
+    const context = canvas.getContext("2d")!;
+    const background = getComputedStyle(element.parentElement!).backgroundColor;
+    context.fillStyle = background;
+    context.fillRect(0, 0, 1, 1);
+    context.fillStyle = shadow;
+    context.fillRect(0, 0, 1, 1);
+    const [red, green, blue] = context.getImageData(0, 0, 1, 1).data;
+    return {
+      label: element.getAttribute("data-focus-probe"),
+      visible: element.matches(":focus-visible"),
+      hovered: element.matches(":hover"),
+      ring: `rgb(${red}, ${green}, ${blue})`,
+      background,
+    };
+  });
 }
 
 function declaredProperties(source: string): string[] {
@@ -171,8 +224,8 @@ describe("compiled theme CSS", () => {
         body: `<!doctype html><html><head><link rel="stylesheet" href="/theme.css"><style>*{transition:none!important}</style></head><body class="bg-background">
           <div id="dialog-surface" style="background:var(--dialog-surface)">
             <select class="select-native"><option>Theme</option></select>
-            <input id="input-boundary" class="border border-input bg-background dark:bg-input/30 placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground" placeholder="Input placeholder">
-            <textarea id="textarea-boundary" class="border border-input bg-transparent dark:bg-input/30 placeholder:text-muted-foreground" placeholder="Textarea placeholder"></textarea>
+            <input id="input-boundary" class="border border-input bg-control-surface placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground" placeholder="Input placeholder">
+            <textarea id="textarea-boundary" class="border border-input bg-control-surface placeholder:text-muted-foreground" placeholder="Textarea placeholder"></textarea>
           </div>
           <div class="bg-popover">
             <div id="destructive-menu-item" data-variant="destructive" class="data-highlighted:bg-accent data-highlighted:text-accent-foreground data-[variant=destructive]:text-status-error-foreground data-[variant=destructive]:data-highlighted:bg-destructive/10 dark:data-[variant=destructive]:data-highlighted:bg-destructive/20 data-[variant=destructive]:data-highlighted:text-status-error-foreground">Delete</div>
@@ -198,12 +251,21 @@ describe("compiled theme CSS", () => {
             <div id="virtual-hunk-header" class="bg-diff-hunk-header"><span id="virtual-hunk-header-text" class="text-muted-foreground">@@ hunk</span></div>
           </div>
           <div id="scroll-area-thumb" data-slot="scroll-area-thumb" class="bg-(color:--scroll-area-thumb) hover:bg-(color:--scroll-area-thumb-hover)" style="width:8px;height:32px"></div>
-          <div id="dark-utility" class="bg-transparent dark:bg-input/30"></div>
+          <div id="dark-utility" class="bg-transparent dark:bg-card"></div>
           <div data-processing-surface="sidebar" class="bg-sidebar-chat-item-bg"><span class="sidebar-processing-indicator bg-status-processing"></span></div>
           <div data-processing-surface="selected sidebar" class="bg-sidebar-chat-item-selected-bg"><span class="sidebar-processing-indicator bg-status-processing"></span></div>
           <div data-processing-surface="selected workspace tab" class="bg-workspace-window-tab-selected"><span class="workspace-chat-processing-indicator bg-status-processing"></span></div>
           <div data-processing-surface="inactive workspace tab" class="bg-workspace-window-tab-selected-inactive"><span class="workspace-chat-processing-indicator bg-status-processing"></span></div>
           <div id="scrollbar" style="width:100px;height:40px;overflow:scroll;scrollbar-gutter:stable"><div style="height:80px"></div></div>
+          <div id="user-bubble" class="bg-user-bubble text-user-bubble-foreground selection:bg-user-bubble-foreground selection:text-user-bubble">
+            <span id="user-bubble-text">Selected message text</span>
+            <div id="user-bubble-code" class="markdown-code-block"><pre><code class="cm-code"><span id="user-bubble-code-text">Selected code</span><span id="user-bubble-code-keyword" class="cm-code-keyword">const</span></code></pre></div>
+            <div class="markdown-body"><table><thead><tr><th id="user-bubble-header">Selected header <strong id="user-bubble-header-text">text</strong></th></tr></thead></table></div>
+            <div id="user-bubble-attachment" class="user-message-attachment bg-background/70 text-foreground"><span id="user-bubble-attachment-text">document.txt</span></div>
+            <div id="user-bubble-alert" class="markdown-link-alert bg-muted text-foreground" role="alert"><span id="user-bubble-alert-text">Blocked file link</span></div>
+            <div class="bg-muted/30"><div id="user-bubble-mermaid-header" class="mermaid-block-header bg-muted/50 text-muted-foreground"><span id="user-bubble-mermaid-header-text">mermaid</span></div></div>
+          </div>
+          ${focusButtonFixture()}
         </body></html>`,
       });
     });
@@ -231,6 +293,23 @@ describe("compiled theme CSS", () => {
         for (const property of profileProperties) {
           expect(values[property], `${profile.id} ${property}`).not.toBe("");
         }
+        const preview = await page.evaluate((themeId) => {
+          const root = document.documentElement;
+          const activeBackground =
+            getComputedStyle(root).getPropertyValue("--background");
+          root.dataset.theme =
+            themeId === "classic-dark" ? "classic-light" : "classic-dark";
+          const element = document.createElement("span");
+          element.dataset.themePreview = themeId;
+          document.body.append(element);
+          const previewBackground =
+            getComputedStyle(element).getPropertyValue("--background");
+          element.remove();
+          return { activeBackground, previewBackground };
+        }, profile.id);
+        expect(preview.previewBackground, `${profile.id} scoped preview`).toBe(
+          preview.activeBackground,
+        );
       }
 
       const colorblindValues = await page.evaluate(() => {
@@ -464,12 +543,87 @@ describe("compiled theme CSS", () => {
         }
       }
 
-      for (const profile of ["phosphor-light", "phosphor-dark"] as const) {
-        const descriptor = THEME_PROFILES.find(
-          (candidate) => candidate.id === profile,
-        );
-        if (!descriptor) throw new Error(`Missing profile ${profile}`);
+      for (const descriptor of THEME_PROFILES) {
+        const profile = descriptor.id;
         await applyProfile(page, descriptor);
+        const bubble = await readRenderedColors(page, "#user-bubble");
+        for (const selector of ["#user-bubble", "#user-bubble-text"]) {
+          const selection = await readRenderedColors(page, selector, {
+            pseudoElement: "::selection",
+          });
+          expect(
+            contrastRatio(selection.foreground, selection.background),
+            `${profile} bubble selected text`,
+          ).toBeGreaterThanOrEqual(4.5);
+          expect(
+            contrastRatio(selection.background, bubble.background),
+            `${profile} visible bubble selection`,
+          ).toBeGreaterThanOrEqual(3);
+        }
+        for (const { surface, selectors, minimumSeparation } of [
+          {
+            surface: "#user-bubble-code",
+            selectors: ["#user-bubble-code-text", "#user-bubble-code-keyword"],
+            minimumSeparation: 3,
+          },
+          {
+            surface: "#user-bubble-header",
+            selectors: ["#user-bubble-header", "#user-bubble-header-text"],
+            minimumSeparation: 3,
+          },
+          {
+            surface: "#user-bubble-attachment",
+            selectors: [
+              "#user-bubble-attachment",
+              "#user-bubble-attachment-text",
+            ],
+            minimumSeparation: 2,
+          },
+          {
+            surface: "#user-bubble-alert",
+            selectors: ["#user-bubble-alert", "#user-bubble-alert-text"],
+            minimumSeparation: 3,
+          },
+          {
+            surface: "#user-bubble-mermaid-header",
+            selectors: [
+              "#user-bubble-mermaid-header",
+              "#user-bubble-mermaid-header-text",
+            ],
+            minimumSeparation: 3,
+          },
+        ]) {
+          const colors = await readRenderedColors(page, surface);
+          for (const selector of selectors) {
+            const selection = await readRenderedColors(page, selector, {
+              pseudoElement: "::selection",
+            });
+            expect(
+              contrastRatio(selection.foreground, selection.background),
+              `${profile} ${selector} selected text`,
+            ).toBeGreaterThanOrEqual(4.5);
+            expect(
+              contrastRatio(selection.background, colors.background),
+              `${profile} ${selector} visible selection`,
+            ).toBeGreaterThanOrEqual(minimumSeparation);
+          }
+        }
+        await page.keyboard.press("Tab");
+        for (const button of await page.locator("[data-focus-probe]").all()) {
+          await page.mouse.move(0, 0);
+          await button.focus();
+          for (const hovered of [false, true]) {
+            if (hovered) await button.hover();
+            const focus = await readButtonFocusColors(button);
+            const label = `${profile} ${focus.label} ${hovered ? "hovered" : "at rest"}`;
+            expect(focus.hovered, `${label} hover`).toBe(hovered);
+            expect(focus.visible, `${label} focus`).toBe(true);
+            expect(
+              contrastRatio(focus.ring, focus.background),
+              `${label} focus ring`,
+            ).toBeGreaterThanOrEqual(3);
+          }
+        }
         const scrollbarWidth = await page.evaluate(() => {
           const scrollbar = document.querySelector<HTMLElement>("#scrollbar");
           if (!scrollbar) throw new Error("Missing scrollbar fixture");
@@ -500,14 +654,19 @@ describe("compiled theme CSS", () => {
             pseudoElement: "::placeholder",
           }),
         ]);
-        expect(
-          contrastRatio(input.border, dialogSurface.background),
-          `${profile} input boundary`,
-        ).toBeGreaterThanOrEqual(3);
-        expect(
-          contrastRatio(select.border, select.background),
-          `${profile} native-select boundary`,
-        ).toBeGreaterThanOrEqual(3);
+        if (
+          profile.startsWith("phosphor-") ||
+          descriptor.rendererPalette === "semantic"
+        ) {
+          expect(
+            contrastRatio(input.border, dialogSurface.background),
+            `${profile} input boundary`,
+          ).toBeGreaterThanOrEqual(3);
+          expect(
+            contrastRatio(select.border, select.background),
+            `${profile} native-select boundary`,
+          ).toBeGreaterThanOrEqual(3);
+        }
         expect(
           contrastRatio(
             inputPlaceholder.foreground,
@@ -540,5 +699,5 @@ describe("compiled theme CSS", () => {
       await context.close();
       await browser.close();
     }
-  }, 20_000);
+  }, 60_000);
 });
