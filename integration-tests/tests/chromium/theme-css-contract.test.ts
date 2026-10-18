@@ -4,9 +4,11 @@ import { fileURLToPath } from "node:url";
 import { chromium, type Locator, type Page } from "playwright";
 import { THEME_PROFILES } from "../../../web/src/lib/theme/themes";
 import { buttonVariants } from "../../../web/src/lib/components/ui/button/button";
+import { buildThinkingOptions } from "../../../web/src/lib/chat/composer/composer-controls";
 import { contrastRatio } from "../../support/color-contrast";
 
 const APP_URL = "http://theme-css-contract.test/";
+const THINKING_OPTIONS = buildThinkingOptions(["xhigh", "max", "ultra"]);
 const DIFF_SYNTAX_CLASSES = [
   "cm-code-keyword",
   "cm-code-title",
@@ -26,6 +28,13 @@ function diffSyntaxFixture(idPrefix: string): string {
     (className) =>
       `<span id="${idPrefix}-${className}" class="${className}">${className}</span>`,
   ).join(" ");
+}
+
+function thinkingButtonFixture(surface: string): string {
+  return THINKING_OPTIONS.map(
+    (option) =>
+      `<button id="thinking-${surface}-${option.value}" aria-label="${option.label}" class="inline-flex size-9 items-center justify-center rounded-lg border ${option.toneClass}"><svg class="size-4" viewBox="0 0 24 24" stroke="currentColor" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="8" /></svg></button>`,
+  ).join("");
 }
 
 function focusButtonFixture(): string {
@@ -159,7 +168,7 @@ async function readRenderedColors(
 }
 
 async function readNormalAndHoveredColors(page: Page, selector: string) {
-  await page.mouse.move(0, 0);
+  await page.mouse.move(-1, -1);
   const normal = await readRenderedColors(page, selector);
   await page.locator(selector).hover();
   const hovered = await readRenderedColors(page, selector);
@@ -223,10 +232,26 @@ describe("compiled theme CSS", () => {
         contentType: "text/html",
         body: `<!doctype html><html><head><link rel="stylesheet" href="/theme.css"><style>*{transition:none!important}</style></head><body class="bg-background">
           <div id="dialog-surface" style="background:var(--dialog-surface)">
-            <select class="select-native"><option>Theme</option></select>
+            ${thinkingButtonFixture("dialog")}
+            <select id="native-select-muted" class="select-native"><option>Theme</option></select>
+            <select class="select-native select-native-surface"><option>Theme surface</option></select>
+            <div id="error-dialog" class="bg-destructive/10 text-destructive">Error</div>
+            <div class="bg-muted/50"><div id="error-muted-dialog" class="bg-destructive/10 text-destructive">Error</div></div>
             <input id="input-boundary" class="border border-input bg-control-surface placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground" placeholder="Input placeholder">
             <textarea id="textarea-boundary" class="border border-input bg-control-surface placeholder:text-muted-foreground" placeholder="Textarea placeholder"></textarea>
+            <div class="ticket-dialog">
+              <input id="ticket-field" class="ticket-input" placeholder="Ticket title">
+              <select id="ticket-select" class="ticket-input"><option>Status</option></select>
+              <span id="native-select-reference" style="background:var(--native-select-surface-background)"></span>
+              <button id="ticket-action" class="ticket-button">Ticket action</button>
+              <button id="ticket-active-action" class="ticket-button" data-active="true">Active filter</button>
+              <button id="ticket-shared-action" class="${buttonVariants()}">Shared action</button>
+              <button id="ticket-code-action" class="focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">Copy code</button>
+            </div>
           </div>
+          ${["background", "card", "popover", "accent"].map((surface) => `<div class="bg-${surface}"><span id="error-${surface}" class="text-destructive">Error</span></div>`).join("")}
+          <div class="bg-card"><span id="merged-badge" class="bg-pr-merged/15 text-pr-merged">Merged</span></div>
+          <div class="bg-card">${thinkingButtonFixture("card")}</div>
           <div class="bg-popover">
             <div id="destructive-menu-item" data-variant="destructive" class="data-highlighted:bg-accent data-highlighted:text-accent-foreground data-[variant=destructive]:text-status-error-foreground data-[variant=destructive]:data-highlighted:bg-destructive/10 dark:data-[variant=destructive]:data-highlighted:bg-destructive/20 data-[variant=destructive]:data-highlighted:text-status-error-foreground">Delete</div>
           </div>
@@ -272,7 +297,7 @@ describe("compiled theme CSS", () => {
 
     try {
       await page.goto(APP_URL);
-      await page.locator(".select-native").waitFor();
+      await page.locator("#native-select-muted").waitFor();
       for (const profile of THEME_PROFILES) {
         const values = await page.evaluate(
           ({ profile, properties }) => {
@@ -365,6 +390,24 @@ describe("compiled theme CSS", () => {
 
       for (const profile of THEME_PROFILES) {
         await applyProfile(page, profile);
+        for (const surface of ["card", "dialog"]) {
+          for (const option of THINKING_OPTIONS) {
+            const colorsByInteraction = await readNormalAndHoveredColors(
+              page,
+              `#thinking-${surface}-${option.value} svg`,
+            );
+            expect(
+              colorsByInteraction.hovered.background,
+              `${profile.id} ${option.value} thinking hover on ${surface}`,
+            ).not.toBe(colorsByInteraction.normal.background);
+            for (const [interaction, colors] of Object.entries(colorsByInteraction)) {
+              expect(
+                contrastRatio(colors.foreground, colors.background),
+                `${profile.id} ${option.value} thinking icon ${interaction} on ${surface}`,
+              ).toBeGreaterThanOrEqual(3);
+            }
+          }
+        }
         const processingColors = await page.evaluate(() => {
           return [
             ...document.querySelectorAll<HTMLElement>(
@@ -645,7 +688,7 @@ describe("compiled theme CSS", () => {
           textareaPlaceholder,
         ] = await Promise.all([
           readRenderedColors(page, "#dialog-surface"),
-          readRenderedColors(page, ".select-native"),
+          readRenderedColors(page, "#native-select-muted"),
           readRenderedColors(page, "#input-boundary"),
           readRenderedColors(page, "#input-boundary", {
             pseudoElement: "::placeholder",
@@ -654,8 +697,127 @@ describe("compiled theme CSS", () => {
             pseudoElement: "::placeholder",
           }),
         ]);
+        for (const nativeSelect of await page.locator(".select-native").all()) {
+          const colors = await nativeSelect.evaluate((element) => {
+            const style = getComputedStyle(element);
+            const imageUrl = style.backgroundImage.slice(5, -2);
+            const svg = new DOMParser().parseFromString(
+              decodeURIComponent(imageUrl.slice(imageUrl.indexOf(",") + 1)),
+              "image/svg+xml",
+            );
+            const stroke = svg.documentElement.getAttribute("stroke");
+            if (!stroke) throw new Error("Missing native select chevron stroke");
+            const probe = document.createElement("span");
+            probe.style.color = stroke;
+            document.body.append(probe);
+            const foreground = getComputedStyle(probe).color;
+            probe.remove();
+            return { foreground, background: style.backgroundColor };
+          });
+          expect(
+            contrastRatio(colors.foreground, colors.background),
+            `${profile} native select chevron`,
+          ).toBeGreaterThanOrEqual(3);
+        }
+        const ticketField = await readRenderedColors(page, "#ticket-field");
+        expect(ticketField.border, `${profile} ticket input border`).toBe(
+          input.border,
+        );
+        expect(ticketField.background, `${profile} ticket input surface`).toBe(
+          input.background,
+        );
+        const ticketSelect = await readRenderedColors(page, "#ticket-select");
+        const nativeSelectReference = await readRenderedColors(
+          page,
+          "#native-select-reference",
+        );
+        expect(
+          ticketSelect.background,
+          `${profile} ticket select surface`,
+        ).toBe(nativeSelectReference.background);
+        await page.mouse.move(0, 0);
+        const activeTicketButton = await readRenderedColors(
+          page,
+          "#ticket-active-action",
+        );
+        await page.locator("#ticket-active-action").hover();
+        const hoveredActiveTicketButton = await readRenderedColors(
+          page,
+          "#ticket-active-action",
+        );
+        expect(
+          hoveredActiveTicketButton.background,
+          `${profile} active ticket hover`,
+        ).toBe(activeTicketButton.background);
+        const ticketPlaceholder = await readRenderedColors(
+          page,
+          "#ticket-field",
+          { pseudoElement: "::placeholder" },
+        );
+        expect(
+          contrastRatio(
+            ticketPlaceholder.foreground,
+            ticketPlaceholder.background,
+          ),
+          `${profile} ticket placeholder`,
+        ).toBeGreaterThanOrEqual(4.5);
+        await page.keyboard.press("Tab");
+        for (const selector of ["#ticket-field", "#ticket-action"]) {
+          await page.locator(selector).focus();
+          const outline = await page.locator(selector).evaluate((element) => {
+            const style = getComputedStyle(element);
+            return {
+              color: style.outlineColor,
+              style: style.outlineStyle,
+              width: style.outlineWidth,
+            };
+          });
+          expect(outline.style).toBe("solid");
+          expect(outline.width).toBe("2px");
+          expect(
+            contrastRatio(outline.color, dialogSurface.background),
+            `${profile} ${selector} focus`,
+          ).toBeGreaterThanOrEqual(3);
+        }
+        for (const selector of [
+          "#ticket-shared-action",
+          "#ticket-code-action",
+        ]) {
+          const button = page.locator(selector);
+          await button.focus();
+          const focus = await button.evaluate((element) => {
+            const style = getComputedStyle(element);
+            return { outline: style.outlineStyle, shadow: style.boxShadow };
+          });
+          expect(focus.outline, `${profile} ${selector} no extra outline`).toBe(
+            "none",
+          );
+          expect(
+            focus.shadow,
+            `${profile} ${selector} retains its ring`,
+          ).not.toBe("none");
+        }
+        if (profile.startsWith("paper-") || profile.startsWith("slate-")) {
+          for (const selector of [
+            "#error-background",
+            "#error-card",
+            "#error-popover",
+            "#error-accent",
+            "#error-dialog",
+            "#error-muted-dialog",
+            "#merged-badge",
+          ]) {
+            const colors = await readRenderedColors(page, selector);
+            expect(
+              contrastRatio(colors.foreground, colors.background),
+              `${profile} ${selector}`,
+            ).toBeGreaterThanOrEqual(4.5);
+          }
+        }
         if (
           profile.startsWith("phosphor-") ||
+          profile === "classic-light" ||
+          profile === "colorblind-light" ||
           descriptor.rendererPalette === "semantic"
         ) {
           expect(
@@ -699,5 +861,5 @@ describe("compiled theme CSS", () => {
       await context.close();
       await browser.close();
     }
-  }, 60_000);
+  }, 90_000);
 });

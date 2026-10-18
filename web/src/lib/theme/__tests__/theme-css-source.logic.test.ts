@@ -172,6 +172,23 @@ describe('theme profile CSS sources', () => {
 		expect.soft(profileSource('phosphor-dark')).toContain('--background: 222 33% 5%;');
 	});
 
+	it('keeps Paper surfaces warm and Slate dark visibly lifted', () => {
+		const paper = propertyValues(profileSource('paper-light'));
+		for (const role of ['background', 'card', 'popover']) {
+			const [red, green, blue] = hslToSrgbChannels(paper[role]);
+			expect(red).toBeGreaterThan(green);
+			expect(green).toBeGreaterThan(blue);
+			expect(red).toBeLessThan(1);
+		}
+		const neko = propertyValues(profileSource('neko-dark'));
+		for (const id of ['paper-dark', 'slate-dark'] as const) {
+			const values = propertyValues(profileSource(id));
+			expect(relativeLuminanceFromChannels(hslToSrgbChannels(values.background))).toBeGreaterThan(
+				relativeLuminanceFromChannels(hslToSrgbChannels(neko.background)),
+			);
+		}
+	});
+
 	it('keeps native painting shared and profile files token-only', () => {
 		const application = readFileSync(new URL('../../../app.css', import.meta.url), 'utf8');
 		expect.soft(application).toContain('scrollbar-color: var(--scroll-area-thumb) transparent;');
@@ -205,6 +222,77 @@ describe('theme profile CSS sources', () => {
 					.soft(contrastRatio(values[surface], values.ring), `${profile.id} focus on ${surface}`)
 					.toBeGreaterThanOrEqual(3);
 			}
+		}
+	});
+
+	it('keeps standalone warnings legible without an opaque warning fill', () => {
+		for (const profile of THEME_PROFILES) {
+			const values = propertyValues(profileSource(profile.id));
+			for (const surface of ['background', 'card', 'popover', 'accent']) {
+				for (const opacity of [0, 0.1, 0.2]) {
+					expect
+						.soft(
+							contrastRatioOnTint(
+								values[surface],
+								values['status-warning'],
+								values['status-warning-muted-foreground'],
+								opacity,
+							),
+							`${profile.id} standalone warning on ${surface} with ${opacity} fill`,
+						)
+						.toBeGreaterThanOrEqual(4.5);
+				}
+			}
+		}
+	});
+
+	it('distinguishes field boundaries from the canvas in every profile', () => {
+		for (const profile of THEME_PROFILES) {
+			const values = propertyValues(profileSource(profile.id));
+			expect
+				.soft(contrastRatio(values.background, values.input), profile.id)
+				.toBeGreaterThanOrEqual(3);
+		}
+	});
+
+	it('keeps Paper and Slate error text and merged badges readable on their surfaces', () => {
+		for (const id of ['paper-light', 'paper-dark', 'slate-light', 'slate-dark'] as const) {
+			const values = propertyValues(profileSource(id));
+			for (const surface of ['background', 'card', 'popover', 'accent']) {
+				expect
+					.soft(contrastRatio(values[surface], values.destructive), `${id} error on ${surface}`)
+					.toBeGreaterThanOrEqual(4.5);
+			}
+			const destructive = hslToSrgbChannels(values.destructive);
+			const popover = hslToSrgbChannels(values.popover);
+			const mutedPopover = blendChannels(popover, hslToSrgbChannels(values.muted), 0.5);
+			for (const [surface, channels] of [
+				['popover', popover],
+				['muted popover', mutedPopover],
+			] as const) {
+				expect
+					.soft(
+						contrastRatioFromChannels(blendChannels(channels, destructive, 0.1), destructive),
+						`${id} tinted error on ${surface}`,
+					)
+					.toBeGreaterThanOrEqual(4.5);
+			}
+			expect
+				.soft(contrastRatioOnTint(values.card, values['pr-merged'], values['pr-merged'], 0.15), id)
+				.toBeGreaterThanOrEqual(4.5);
+		}
+	});
+
+	it('keeps Slate Dark hover and highlight surfaces distinct', () => {
+		const values = propertyValues(profileSource('slate-dark'));
+		for (const [surface, highlight] of [
+			['sidebar-chat-item-bg', 'sidebar-chat-item-hover-bg'],
+			['popover', 'accent'],
+			['popover', 'muted'],
+		]) {
+			expect
+				.soft(contrastRatio(values[surface], values[highlight]), highlight)
+				.toBeGreaterThan(1.12);
 		}
 	});
 
