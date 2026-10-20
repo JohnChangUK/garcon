@@ -107,6 +107,7 @@ test('persists inline image size limits and bounds local and external images wit
       { size: 'medium', maxWidth: 640, maxHeight: 320 },
       { size: 'small', maxWidth: 320, maxHeight: 180 },
       { size: 'large', maxWidth: 960, maxHeight: 480 },
+      { size: 'full', maxWidth: Infinity, maxHeight: Infinity },
     ];
     const viewports = [
       { label: 'desktop', width: 1440, height: 900 },
@@ -197,12 +198,12 @@ test('persists inline image size limits and bounds local and external images wit
 
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.reload();
-    await browserExpect(page.locator('html')).toHaveAttribute('data-inline-image-thumbnail-size', 'large');
+    await browserExpect(page.locator('html')).toHaveAttribute('data-inline-image-thumbnail-size', 'full');
     const savedSize = await page.evaluate(() =>
       JSON.parse(localStorage.getItem('pref_local_settings') ?? '{}').inlineImageThumbnailSize,
     );
-    expect(savedSize).toBe('large');
-    await browserExpect(assistant.getByRole('img', { name: 'Tall capture', exact: true })).toHaveCSS('max-height', '480px');
+    expect(savedSize).toBe('full');
+    await browserExpect(assistant.getByRole('img', { name: 'Tall capture', exact: true })).toHaveCSS('max-height', 'none');
     const composer = page.locator('[data-conversation-composer-host] textarea[placeholder="Reply..."]');
     await composer.focus();
     const originalComposer = await composer.elementHandle();
@@ -215,6 +216,96 @@ test('persists inline image size limits and bounds local and external images wit
     expect(await composer.evaluate((element, original) => element === original, originalComposer)).toBe(true);
     expect(await composer.evaluate((element) => document.activeElement === element)).toBe(true);
     expect(Math.abs((await composer.boundingBox())!.y - composerBounds!.y)).toBeLessThan(1);
+    await assistant.getByRole('button', { name: 'Open image Small capture', exact: true }).click();
+    await expectDecodedImage(page.getByRole('img', { name: 'small.png', exact: true }));
     assertNoBrowserErrors();
   });
+}, 180_000);
+
+test('opens remote thumbnails in the image viewer with mouse, keyboard, and mobile controls', async () => {
+  await withChromiumFixture('markdown-image-viewer', async ({ page, integration, assertNoBrowserErrors }) => {
+    const { client, executionDirs, directAgents, garcon } = integration;
+    await writeFile(join(executionDirs.project, 'capture.png'), await createImageBuffer(page, { width: 1400, height: 900 }));
+    await writeFile(join(executionDirs.project, 'linked.md'), '# Linked document');
+    const chatId = integration.newChatId();
+    const started = await client.startDirectChat({
+      chatId,
+      content: '![Capture](capture.png)\n\n[![Linked capture](capture.png)](linked.md)',
+      projectPath: executionDirs.project,
+      agent: directAgents.openAi,
+    });
+    await client.waitForTurnTerminal(chatId, started.turnId);
+    await page.addInitScript(() => {
+      const settings = JSON.parse(localStorage.getItem('pref_local_settings') ?? '{}');
+      localStorage.setItem('pref_local_settings', JSON.stringify({ ...settings, imageViewerOpenPlacement: 'dialog' }));
+    });
+    const contentRequests: Array<{ url: string; authorization?: string }> = [];
+    const releaseContent = new Deferred<void>();
+    await page.route('**/api/v1/files/content?**', async (route) => {
+      contentRequests.push({ url: route.request().url(), authorization: route.request().headers().authorization });
+      await releaseContent.promise;
+      await route.continue();
+    });
+    await page.goto(`${garcon.baseUrl}/chat/${chatId}`);
+    const assistant = page.locator('[data-chat-message-type="assistant-message"]');
+    const thumbnail = assistant.getByRole('button', { name: 'Open image Capture', exact: true });
+    const thumbnailImage = thumbnail.getByRole('img');
+    const imageLink = assistant.getByRole('link', { name: 'Linked capture', exact: true });
+    const dialog = page.locator('[role="dialog"][data-workspace-surface-id^="file:"]');
+    const expandedImage = dialog.getByRole('img', { name: 'capture.png', exact: true });
+    try {
+      const spinner = assistant.getByRole('status', { name: 'Loading image...' }).first();
+      await browserExpect(spinner.locator('svg.animate-spin')).toBeVisible();
+      await browserExpect(spinner).toHaveText('');
+      await browserExpect(spinner).toHaveAttribute('aria-busy', 'true');
+      await browserExpect(thumbnail).toHaveCount(0);
+    } finally {
+      releaseContent.resolve();
+    }
+    await expectDecodedImage(thumbnailImage);
+    const thumbnailSource = await thumbnailImage.getAttribute('src');
+    await browserExpect(imageLink.locator('button')).toHaveCount(0);
+    const artifactDirectory = new URL('../../artifacts/chromium/', import.meta.url).pathname;
+    await mkdir(artifactDirectory, { recursive: true });
+    for (const activation of ['click', 'Enter', 'Space']) {
+      if (activation === 'click') {
+        await thumbnailImage.click();
+      } else {
+        await thumbnail.press(activation);
+      }
+      await expectDecodedImage(expandedImage);
+      expect(await expandedImage.getAttribute('src')).not.toBe(thumbnailSource);
+      await browserExpect(dialog.getByRole('button', { name: 'Fit to window (0)', exact: true })).toBeVisible();
+      const beforeZoom = await expandedImage.boundingBox();
+      await dialog.getByRole('button', { name: 'Zoom in (+)', exact: true }).click();
+      await browserExpect.poll(async () => (await expandedImage.boundingBox())!.width).toBeGreaterThan(beforeZoom!.width);
+      if (activation === 'click') {
+        await page.screenshot({ path: join(artifactDirectory, 'markdown-image-viewer-desktop.png') });
+      }
+      await page.keyboard.press('Escape');
+      await browserExpect(dialog).toHaveCount(0);
+      await browserExpect(thumbnail).toBeFocused();
+      await expectDecodedImage(thumbnailImage);
+    }
+    expect(contentRequests.length).toBeGreaterThanOrEqual(3);
+    for (const request of contentRequests) {
+      const query = new URL(request.url).searchParams;
+      expect(query.get('executorId')).toBe(client.executorId);
+      expect(query.get('projectPath')).toBe(executionDirs.project);
+      expect(query.get('path')).toBe('capture.png');
+      expect(request.authorization).toBe(`Bearer ${garcon.authToken}`);
+    }
+    await imageLink.click();
+    await browserExpect(page.getByRole('heading', { name: 'Linked document', exact: true })).toBeVisible();
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(`${garcon.baseUrl}/chat/${chatId}`);
+    await browserExpect(page.locator('.mobile-shell')).toHaveCount(1);
+    await thumbnail.click();
+    const mobileImage = page.getByRole('img', { name: 'capture.png', exact: true });
+    await expectDecodedImage(mobileImage);
+    await browserExpect(page.getByRole('button', { name: 'Fit to window (0)', exact: true })).toBeVisible();
+    await page.screenshot({ path: join(artifactDirectory, 'markdown-image-viewer-mobile.png') });
+    assertNoBrowserErrors();
+  }, undefined, { executionBackend: 'remote-controller-dials', projectRoots: 'separate' });
 }, 180_000);
