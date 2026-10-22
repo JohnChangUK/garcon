@@ -897,8 +897,8 @@
 		{#each separatorItems as separator (separator.key)}
 			<div
 				aria-hidden="true"
-				class="pointer-events-none absolute inset-x-0 z-10 bg-border"
-				style={`top:${separator.top}px;height:${separator.height}px;`}
+				class="pointer-events-none absolute right-0 z-10 bg-border"
+				style={`top:${separator.top}px;left:${separator.left}px;height:${separator.height}px;`}
 				data-sidebar-virtual-list-separator={separator.key}
 			></div>
 		{/each}
@@ -911,6 +911,7 @@
 				{#if row.type === 'executor-header'}
 					<SidebarExecutorHeaderRow
 						{row}
+						separated={virtualItem.index > 0}
 						containsSelectedChat={Boolean(
 							row.isCollapsed && selectedChatId && row.chatIds.includes(selectedChatId),
 						)}
