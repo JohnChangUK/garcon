@@ -296,8 +296,11 @@ describe('ConversationSlashCommandService', () => {
 		expect(service.dispatchSubmission(input)).toEqual({ kind: 'handled', outcome: 'rejected' });
 		expect(appendLocalNotice).toHaveBeenLastCalledWith(
 			'error',
-			'Remove attachments before steering the active turn.',
+			'This agent cannot take attachments while steering. Remove them before steering the active turn.',
 		);
+
+		deps.modelCatalog.supportsSteeringAttachments.mockReturnValue(true);
+		expect(service.dispatchSubmission(input)).toEqual({ kind: 'steer', content: 'Focus here' });
 	});
 
 	it('restores rename text and attachments when rename fails', async () => {

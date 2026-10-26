@@ -4057,6 +4057,34 @@ describe('ConversationSessionController', () => {
 		expect(deps.composerState.clearAfterSubmit).toHaveBeenCalledWith('chat-1');
 	});
 
+	it('sends Ctrl+Enter steer attachments to an agent that takes them', async () => {
+		const { deps } = createDeps(createRunningChat({ agentId: 'claude', isProcessing: true }));
+		deps.composerState.inputText = 'read the word in this screenshot';
+		deps.composerState.images = [new File(['image'], 'capture.png', { type: 'image/png' })];
+		mockSteerChat.mockResolvedValueOnce({
+			success: true,
+			commandType: 'steer',
+			clientRequestId: 'req-steer-image',
+			chatId: 'chat-1',
+			turnId: 'turn-1',
+			status: 'accepted',
+			acceptedAt: '2026-08-10T00:00:00.000Z',
+		});
+
+		const outcome = await new ConversationSessionController(deps).submitComposerWithSteerPreference(
+			'chat-1',
+		);
+
+		expect(outcome).toBe('accepted');
+		expect(mockSteerChat).toHaveBeenCalledWith(
+			expect.objectContaining({
+				content: 'read the word in this screenshot',
+				images: [expect.objectContaining({ name: 'capture.png', mimeType: 'image/png' })],
+			}),
+		);
+		expect(mockCreateQueuedInput).not.toHaveBeenCalled();
+	});
+
 	it.each(['submitForChat', 'submitComposerWithSteerPreference'] as const)(
 		'preserves literal source and bypasses controller slash commands through %s', async (submit) => {
 			const { deps } = createDeps(createRunningChat({ agentId: 'codex', model: 'variant',
@@ -4182,7 +4210,7 @@ describe('ConversationSessionController', () => {
 		expect(attached.deps.chatState.appendLocalNoticeForChat).toHaveBeenCalledWith(
 			'chat-1',
 			'error',
-			'Remove attachments before steering the active turn.',
+			'This agent cannot take attachments while steering. Remove them before steering the active turn.',
 		);
 		expect(attached.deps.composerState.clearAfterSubmit).not.toHaveBeenCalled();
 		expect(mockSteerChat).not.toHaveBeenCalled();
