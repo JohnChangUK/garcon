@@ -143,6 +143,7 @@ export interface SessionControllerDeps {
 		| 'supportsFork'
 		| 'supportsForkWhileRunning'
 		| 'supportsSteering'
+		| 'supportsSteeringAttachments'
 	>;
 	getExecutionDefaults(
 		agentId: SessionAgentId,

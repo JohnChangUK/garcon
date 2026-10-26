@@ -265,6 +265,7 @@ export class AcceptedInputHandler {
           clientRequestId: input.command.clientRequestId,
           clientMessageId: input.clientMessageId,
           transcriptViewId: input.transcriptViewId,
+          images: [...input.images],
         },
         input.target,
         (turnId) => input.settlement.markScheduled(input.command, turnId),
@@ -287,6 +288,7 @@ export class AcceptedInputHandler {
       const result = await this.#controls.createSteer(
         input.command.chatId,
         input.content,
+        input.images,
         { key: input.command.key, entryId: input.command.entryId },
         { clientMessageId: input.clientMessageId, transcriptViewId: input.transcriptViewId },
       );
@@ -341,6 +343,7 @@ export class AcceptedInputHandler {
           clientRequestId: input.command.clientRequestId,
           clientMessageId: input.clientMessageId,
           transcriptViewId: input.transcriptViewId,
+          images: [...reservation.entry.images],
         },
         input.target,
         (turnId) => input.settlement.markScheduled(input.command, turnId),

@@ -7,12 +7,17 @@ import {
   CodexAppServerRpcError,
   type CodexAppServerClient,
 } from './client.ts';
-import { buildUserInput } from './request-builders.ts';
+import {
+  buildUserInput,
+  commandWithAttachmentPaths,
+  writeAttachmentsToTempFiles,
+} from './request-builders.ts';
 
 interface SteerableCodexSession {
   threadId: string;
   client: CodexAppServerClient;
   activeDeliveryReservations: number;
+  cleanupAttachments?: () => Promise<void>;
 }
 
 export async function steerCodexSession(
@@ -23,10 +28,22 @@ export async function steerCodexSession(
 ): Promise<AgentSteerResult> {
   session.activeDeliveryReservations += 1;
   try {
+    const attachments = await writeAttachmentsToTempFiles(request.attachments);
+    // Codex reads the files while the turn runs, so they go when the turn's own attachments do.
+    if (request.attachments.length > 0) {
+      const previousCleanup = session.cleanupAttachments;
+      session.cleanupAttachments = async () => {
+        await previousCleanup?.();
+        await attachments.cleanup();
+      };
+    }
     const response = await session.client.steerTurn({
       threadId: session.threadId,
       expectedTurnId,
-      input: buildUserInput(request.input, []),
+      input: buildUserInput(
+        commandWithAttachmentPaths(request.input, attachments.filePaths),
+        attachments.imagePaths,
+      ),
       clientUserMessageId: request.clientMessageId,
     }, {
       prepareDelivery: request.prepareDelivery,

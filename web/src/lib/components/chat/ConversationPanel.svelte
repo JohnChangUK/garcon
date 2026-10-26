@@ -89,6 +89,7 @@
 		isProcessing && panel.lifecycle.loadingStatus?.can_interrupt !== false,
 	);
 	const canSteer = $derived(isProcessing && modelCatalog.supportsSteering(chat.agentId));
+	const canSteerAttachments = $derived(modelCatalog.supportsSteeringAttachments(chat.agentId));
 	const executorId = $derived(chat.executorId ?? 'local');
 	const projectPath = $derived(
 		executors.gitAvailable(executorId) ? chat.projectPath || null : null,
@@ -313,6 +314,7 @@
 				{queue}
 				{canInterrupt}
 				{canSteer}
+				{canSteerAttachments}
 				{announcementsEnabled}
 				onInterrupt={() => actions?.interruptQueue(surfaceId, chatId)}
 				onSteer={(entry, revision) => actions?.steerQueue(surfaceId, chatId, entry, revision)}

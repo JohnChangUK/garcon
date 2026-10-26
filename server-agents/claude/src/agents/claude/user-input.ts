@@ -55,16 +55,15 @@ export function buildClaudeInitialUserContent(
   return blocks;
 }
 
-export function buildClaudeSteeringUserContent(input: string): readonly [{
-  readonly type: 'text';
-  readonly text: string;
-}] {
-  return [{
-    type: 'text',
-    text: `${CLAUDE_STEERING_PROMPT_PREFIX}${input}`,
-  }];
+export function buildClaudeSteeringUserContent(
+  input: string,
+  attachments: readonly AgentAttachment[],
+): readonly unknown[] {
+  const content = buildClaudeInitialUserContent(`${CLAUDE_STEERING_PROMPT_PREFIX}${input}`, attachments);
+  return typeof content === 'string' ? [{ type: 'text', text: content }] : content as unknown[];
 }
 
+// Attachment blocks ride along with the steering text, so only text blocks name inputs.
 export function claudeSteeringInputsFromNativeContent(
   content: unknown,
 ): readonly string[] | null {
@@ -72,10 +71,12 @@ export function claudeSteeringInputsFromNativeContent(
   const inputs: string[] = [];
   for (const block of content) {
     if (!block || typeof block !== 'object' || Array.isArray(block)) return null;
-    if (!('type' in block) || block.type !== 'text') return null;
+    if (!('type' in block)) return null;
+    if (block.type === 'image' || block.type === 'document') continue;
+    if (block.type !== 'text') return null;
     if (!('text' in block) || typeof block.text !== 'string') return null;
     if (!block.text.startsWith(CLAUDE_STEERING_PROMPT_PREFIX)) return null;
     inputs.push(block.text.slice(CLAUDE_STEERING_PROMPT_PREFIX.length));
   }
-  return inputs;
+  return inputs.length > 0 ? inputs : null;
 }

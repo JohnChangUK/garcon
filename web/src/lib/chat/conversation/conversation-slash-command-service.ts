@@ -129,6 +129,7 @@ interface SlashCommandModelCatalog {
 	supportsFork(agentId: SessionAgentId): boolean;
 	supportsForkWhileRunning(agentId: SessionAgentId): boolean;
 	supportsSteering(agentId: SessionAgentId): boolean;
+	supportsSteeringAttachments(agentId: SessionAgentId): boolean;
 }
 
 export interface ConversationSlashCommandDeps {
@@ -216,6 +217,7 @@ export class ConversationSlashCommandService {
 			const rejection = steerSubmissionRejection({
 				prompt,
 				supportsSteering: modelCatalog.supportsSteering(agentId),
+				supportsSteeringAttachments: modelCatalog.supportsSteeringAttachments(agentId),
 				attachmentCount: images.length,
 			});
 			if (rejection) {

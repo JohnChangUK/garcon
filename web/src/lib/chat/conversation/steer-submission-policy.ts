@@ -6,11 +6,12 @@ export type SteerSubmissionRejection =
 export function steerSubmissionRejection(input: {
 	prompt: string;
 	supportsSteering: boolean;
+	supportsSteeringAttachments: boolean;
 	attachmentCount: number;
 }): SteerSubmissionRejection | null {
 	if (input.prompt.trim().length === 0) return 'prompt-required';
 	if (!input.supportsSteering) return 'unsupported';
-	if (input.attachmentCount > 0) return 'attachments-unavailable';
+	if (input.attachmentCount > 0 && !input.supportsSteeringAttachments) return 'attachments-unavailable';
 	return null;
 }
 

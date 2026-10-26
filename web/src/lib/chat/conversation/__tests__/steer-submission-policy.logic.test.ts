@@ -10,6 +10,7 @@ describe('steerSubmissionRejection', () => {
 		steerSubmissionRejection({
 			prompt: 'Focus on the failing test',
 			supportsSteering: true,
+			supportsSteeringAttachments: false,
 			attachmentCount: 0,
 			...overrides,
 		});
@@ -30,13 +31,20 @@ describe('steerSubmissionRejection', () => {
 		expect(validate({ attachmentCount: 1 })).toBe('attachments-unavailable');
 	});
 
+	it('accepts attachments when the agent steers with them', () => {
+		expect(validate({ supportsSteeringAttachments: true, attachmentCount: 2 })).toBeNull();
+		expect(
+			validate({ supportsSteering: false, supportsSteeringAttachments: true, attachmentCount: 1 }),
+		).toBe('unsupported');
+	});
+
 	it('maps every rejection to the existing localized notice', () => {
 		expect(steerSubmissionRejectionNotice('prompt-required')).toBe('Add guidance after /steer.');
 		expect(steerSubmissionRejectionNotice('unsupported')).toBe(
 			'/steer is not supported by this agent.',
 		);
 		expect(steerSubmissionRejectionNotice('attachments-unavailable')).toBe(
-			'Remove attachments before steering the active turn.',
+			'This agent cannot take attachments while steering. Remove them before steering the active turn.',
 		);
 	});
 

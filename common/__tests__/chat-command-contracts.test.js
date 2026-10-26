@@ -323,6 +323,25 @@ describe('chat command request parsers', () => {
     })).toThrow(CommandRequestValidationError);
   });
 
+  it('parses steer attachments with the same validation as a turn', () => {
+    const steer = {
+      clientRequestId: 'request-steer-image',
+      clientMessageId: 'message-steer-image',
+      chatId: CHAT_ID,
+      transcriptViewId: TRANSCRIPT_VIEW_ID,
+      content: 'read this',
+    };
+    const image = { data: 'data:image/png;base64,iVBORw0KGgo=', name: 'word.png', mimeType: 'image/png' };
+    expect(parseSteerCommandRequest({ ...steer, images: [image] })).toEqual({ ...steer, images: [image] });
+    expect(parseSteerCommandRequest(steer)).not.toHaveProperty('images');
+    expect(() => parseSteerCommandRequest({ ...steer, images: 'word.png' }))
+      .toThrow(CommandRequestValidationError);
+    expect(() => parseSteerCommandRequest({ ...steer, images: [{ name: 'word.png' }] }))
+      .toThrow(CommandRequestValidationError);
+    expect(() => parseSteerCommandRequest({ ...steer, content: ' ', images: [image] }))
+      .toThrow(CommandRequestValidationError);
+  });
+
   it('parses what a steer does when the turn cannot take it', () => {
     const steer = {
       clientRequestId: 'request-steer-policy',

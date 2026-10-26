@@ -4,7 +4,11 @@ import type { SessionControllerDeps } from './conversation-session-controller.sv
 import type { AcceptedInputSubmissionService } from './accepted-input-submission-service.js';
 import type { ConversationQueueController } from './conversation-queue-controller.svelte.js';
 import type { ConversationSubmissionOutcome } from './conversation-submission-outcome.js';
-import { errorDetail, optimisticUserInput } from './conversation-submission-helpers.js';
+import {
+	errorDetail,
+	optimisticUserInput,
+	prepareChatImages,
+} from './conversation-submission-helpers.js';
 import { settleSubmissionFailure } from './submission-settlement.js';
 import { CommandOutcomeUnknownError } from './idempotent-command.js';
 import { steerFailureNotice } from './steer-failure-notice.js';
@@ -152,10 +156,11 @@ export async function submitSteerRoute(
 		chatId: context.chatId,
 		transcriptViewId: requireTranscriptView(deps, context.chatId),
 		content: context.content,
+		images: context.images.length > 0 ? context.images : undefined,
 		whenTurnUnavailable: 'queue',
 	});
 	deps.chatState.upsertOptimisticUserInput(
-		optimisticUserInput(context.chatId, context.content, [], submission.clientMessageId, context.contentMode, context.contentFormat),
+		optimisticUserInput(context.chatId, context.content, context.images, submission.clientMessageId, context.contentMode, context.contentFormat),
 	);
 	if (deps.sessions.selectedChatId === context.chatId) deps.scrollToBottom();
 	const clearedComposerRevision = clearOwnedComposer(deps, context);
@@ -184,7 +189,26 @@ export async function submitSteerRoute(
 	}
 }
 
-export function submitSteerPreferenceRoute(
+// Returns null after reporting a failure to read the attachments.
+export async function prepareSteerImages(
+	deps: Pick<RouteDeps, 'chatState'>,
+	chatId: string,
+	files: readonly File[],
+): Promise<ChatImage[] | null> {
+	if (files.length === 0) return [];
+	try {
+		return await prepareChatImages([...files]);
+	} catch (error) {
+		deps.chatState.appendLocalNoticeForChat(
+			chatId,
+			'error',
+			m.chat_notice_failed_prepare_attachments({ detail: errorDetail(error) }),
+		);
+		return null;
+	}
+}
+
+export async function submitSteerPreferenceRoute(
 	deps: RouteDeps,
 	acceptedInputs: AcceptedInputSubmissionService,
 	input: {
@@ -192,14 +216,17 @@ export function submitSteerPreferenceRoute(
 		chat: ChatSessionRecord;
 		text: string;
 		supportsSteering: boolean;
+		supportsSteeringAttachments: boolean;
 		contentMode: 'literal' | undefined;
 		contentFormat?: 'plain' | 'markdown';
 	},
 ): Promise<ConversationSubmissionOutcome> {
+	const files = [...deps.composerState.images];
 	const rejection = steerSubmissionRejection({
 		prompt: input.text,
 		supportsSteering: input.supportsSteering,
-		attachmentCount: deps.composerState.images.length,
+		supportsSteeringAttachments: input.supportsSteeringAttachments,
+		attachmentCount: files.length,
 	});
 	if (rejection) {
 		deps.chatState.appendLocalNoticeForChat(
@@ -207,8 +234,10 @@ export function submitSteerPreferenceRoute(
 			'error',
 			steerShortcutRejectionNotice(rejection),
 		);
-		return Promise.resolve('rejected');
+		return 'rejected';
 	}
+	const images = await prepareSteerImages(deps, input.chatId, files);
+	if (!images) return 'rejected';
 
 	return submitSteerRoute(deps, acceptedInputs, {
 		chatId: input.chatId,
@@ -218,9 +247,9 @@ export function submitSteerPreferenceRoute(
 		content: input.text,
 		contentMode: input.contentMode,
 		contentFormat: input.contentFormat,
-		images: [],
+		images,
 		previousText: deps.composerState.inputText,
-		previousImages: [...deps.composerState.images],
+		previousImages: files,
 		ownsComposer: true,
 		composerRevisionAfterClear: null,
 	});

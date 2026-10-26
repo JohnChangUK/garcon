@@ -61,6 +61,7 @@ export interface AgentMetadata extends Pick<AgentCatalogEntry, 'executionPolicy'
 	supportsForkWhileRunning: boolean;
 	supportsUpdateProjectPath: boolean;
 	supportsSteering: boolean;
+	supportsSteeringAttachments: boolean;
 	supportsImages: boolean;
 	fileAttachmentMimeTypes: FileAttachmentMimeTypes;
 	acceptsApiProviderEndpoints: boolean;
@@ -308,6 +309,7 @@ function normalizeAgentMetadataMap(agentMetadata: AgentMetadataMap): AgentMetada
 						supportsForkWhileRunning: metadata.supportsForkWhileRunning === true,
 						supportsUpdateProjectPath: metadata.supportsUpdateProjectPath === true,
 						supportsSteering: metadata.supportsSteering === true,
+						supportsSteeringAttachments: metadata.supportsSteeringAttachments === true,
 						label: metadata.label ?? id,
 						supportedPermissionModes: normalizePermissionModes(metadata.supportedPermissionModes),
 						supportedThinkingModes: normalizeThinkingModes(metadata.supportedThinkingModes),
@@ -354,6 +356,7 @@ function parseCatalogResponse(data: unknown): {
 			supportsForkWhileRunning: Boolean(entry.supportsForkWhileRunning),
 			supportsUpdateProjectPath: Boolean(entry.supportsUpdateProjectPath),
 			supportsSteering: Boolean(entry.supportsSteering),
+			supportsSteeringAttachments: Boolean(entry.supportsSteeringAttachments),
 			supportsImages: Boolean(entry.supportsImages),
 			fileAttachmentMimeTypes: normalizeFileAttachmentMimeTypes(entry.fileAttachmentMimeTypes),
 			acceptsApiProviderEndpoints: Boolean(entry.acceptsApiProviderEndpoints),
@@ -637,6 +640,11 @@ export class ModelCatalogStore {
 	supportsSteering(agentId: SessionAgentId): boolean {
 		if (!isAgentId(agentId)) return false;
 		return this.agentMetadata[agentId]?.supportsSteering ?? false;
+	}
+
+	supportsSteeringAttachments(agentId: SessionAgentId): boolean {
+		if (!isAgentId(agentId)) return false;
+		return this.agentMetadata[agentId]?.supportsSteeringAttachments ?? false;
 	}
 
 	supportsImages(

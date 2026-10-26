@@ -135,6 +135,7 @@ describe('ClaudeAgentIntegration', () => {
     expect(integration.steering).toEqual({
       captureTarget: expect.any(Function),
       steer: expect.any(Function),
+      acceptsAttachments: true,
     });
     expect(integration.auth).toBeDefined();
     expect(integration.commands).toBeDefined();

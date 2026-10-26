@@ -10,7 +10,7 @@ function metadata(id: string): AgentMetadata {
 		executionPolicy: 'conversation',
 		selectionLabel: 'Model', inputFormatByModel: {},
 		id, label: id, supportsCompact: false, supportsFork: false, supportsForkAtMessage: false,
-		supportsForkWhileRunning: false, supportsUpdateProjectPath: true, supportsSteering: true,
+		supportsForkWhileRunning: false, supportsUpdateProjectPath: true, supportsSteering: true, supportsSteeringAttachments: false,
 		supportsImages: false, fileAttachmentMimeTypes: [], acceptsApiProviderEndpoints: false,
 		supportedProtocols: [], authLoginSupported: false, supportedPermissionModes: ['default'],
 		supportedThinkingModes: ['none'], settings: [],

@@ -229,6 +229,7 @@ export type ServerControlOffer = CapturedControlOffer | { readonly kind: 'queued
 export interface AcceptedSteerInput {
   command: AcceptedExecutionCommand;
   content: string;
+  images: readonly AgentCommandImage[];
   providerContent: string;
   clientMessageId: string;
   transcriptViewId: string;
@@ -250,6 +251,7 @@ export interface AcceptedQueueEntrySteerOutcome extends AcceptedSteerOutcome {
 export interface AcceptedQueueSteerCreate {
   command: AcceptedExecutionCommand & { entryId: string };
   content: string;
+  images: readonly AgentCommandImage[];
   clientMessageId: string;
   transcriptViewId: string;
   settlement: CommandSettlementPort;

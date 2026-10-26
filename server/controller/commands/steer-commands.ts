@@ -10,6 +10,7 @@ import type {
   SteerCommandRequest,
   SteerCommandResponse,
 } from '../../../common/chat-command-contracts.ts';
+import type { AgentCommandImage } from '../../../common/ws-requests.ts';
 import { DomainError } from '../../common/domain-error.js';
 import { STEER_NOT_DELIVERED_MESSAGE, SteerDeliveryError, steeringUnsupportedError, steerTurnChangedError } from '../chat-execution/steering-errors.js';
 import { QueueEntrySteerError } from '../chat-execution/queue-steer-error.js';
@@ -51,6 +52,7 @@ export class SteerCommands {
 
   async submit(input: SteerCommandRequest): Promise<SteerCommandResponse | QueuedSteerCommandResponse> {
     this.support.assertContent(input.content);
+    const images = input.images ?? [];
     const clientRequestId = this.support.requireClientRequestId(input.clientRequestId);
     const clientMessageId = this.support.requireClientRequestId(
       input.clientMessageId,
@@ -69,6 +71,7 @@ export class SteerCommands {
         chatId: input.chatId,
         transcriptViewId: input.transcriptViewId,
         content: input.content,
+        ...(images.length > 0 ? { images } : {}),
         clientMessageId,
         userMessagePresentation: input.userMessagePresentation ?? null,
         whenTurnUnavailable: input.whenTurnUnavailable ?? 'reject',
@@ -93,6 +96,7 @@ export class SteerCommands {
         }
 
         await this.support.assertCurrentTranscriptView(input.chatId, input.transcriptViewId);
+        this.#assertSteerAttachments(input.chatId, images);
 
         let ledger: LedgerAcceptResult;
         try {
@@ -140,7 +144,7 @@ export class SteerCommands {
         }
         outcomeTurnId = target?.identity.turnId;
         if (queueWhenUnavailable && !target?.providerTarget) {
-          return this.#queueSteer(input, clientMessageId, ledger.record);
+          return this.#queueSteer(input, images, clientMessageId, ledger.record);
         }
         if (!target) {
           const error = new DomainError(
@@ -155,6 +159,7 @@ export class SteerCommands {
         const outcome = await this.deps.queue.deliverAcceptedSteer({
           command,
           content: input.content,
+          images,
           providerContent,
           clientMessageId,
           transcriptViewId: input.transcriptViewId,
@@ -326,12 +331,14 @@ export class SteerCommands {
           await this.#settleQueueFailure(command, error, 'not-sent');
           throw error;
         }
-        // Steering delivers text only; attachments never change for an entry.
-        if (observedEntry.images.length > 0) {
+        try {
+          this.#assertSteerAttachments(input.chatId, observedEntry.images);
+        } catch (failure) {
+          if (!(failure instanceof CommandValidationError)) throw failure;
           const error = new QueueEntrySteerError(
-            'OPERATION_UNSUPPORTED',
-            'Queued messages with attachments cannot steer the active turn',
-            409,
+            failure.code,
+            failure.message,
+            failure.status,
             'not-sent',
             await this.deps.queue.readChatExecutionControl(input.chatId),
           );
@@ -366,6 +373,7 @@ export class SteerCommands {
         const outcome = await this.deps.queue.deliverAcceptedQueueEntrySteer({
           command,
           content: observedEntry.content,
+          images: observedEntry.images,
           providerContent,
           clientMessageId,
           transcriptViewId: input.transcriptViewId,
@@ -459,8 +467,21 @@ export class SteerCommands {
     }
   }
 
+  // Applies the same model checks as a turn start, after the agent's own steering check.
+  #assertSteerAttachments(chatId: string, images: readonly AgentCommandImage[]): void {
+    const chat = this.deps.chats.getChat(chatId);
+    if (!chat || images.length === 0) return;
+    if (!this.deps.agents.steeringAcceptsAttachments(chat.agentId, chat.executorId)) {
+      throw new CommandValidationError(
+        'OPERATION_UNSUPPORTED', 'This agent cannot take attachments while steering the active turn', 409,
+      );
+    }
+    this.support.assertAttachmentsSupported({ ...chat, attachments: images });
+  }
+
   async #queueSteer(
     input: SteerCommandRequest,
+    images: readonly AgentCommandImage[],
     clientMessageId: string,
     record: CommandLedgerRecord,
   ): Promise<QueuedSteerCommandResponse> {
@@ -472,6 +493,7 @@ export class SteerCommands {
         entryId: crypto.randomUUID(),
       },
       content: input.content,
+      images,
       clientMessageId,
       transcriptViewId: input.transcriptViewId,
       settlement: this.support.settlement,

@@ -192,10 +192,10 @@ export function createQueueEntry(
 // before any queued turn starts.
 export function createQueuedSteer(
   current: StoredChatExecutionControlState,
-  input: Omit<QueueEntryInput, 'images'>,
+  input: QueueEntryInput,
   context: TransitionContext,
 ): ControlTransition<QueueMutationValue> {
-  return insertQueueEntry(current, { ...input, images: [] }, 'steer', context);
+  return insertQueueEntry(current, input, 'steer', context);
 }
 
 function insertQueueEntry(

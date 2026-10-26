@@ -32,7 +32,7 @@ type Call<Q, R> = { readonly request: Q; readonly result: R };
 // frames. Bump it with any change to what either side sends or accepts. Builds
 // of one release share a package version, so without the bump a mismatched
 // pair passes the handshake and fails mid-session instead.
-export const EXECUTOR_PROTOCOL_REVISION = 35;
+export const EXECUTOR_PROTOCOL_REVISION = 36;
 
 export const NULLABLE_AGENT_FACETS = [
   'readiness',
@@ -53,6 +53,7 @@ export interface IntegrationManifest {
   readonly authMethods: { readonly launchLogin: boolean; readonly completeLogin: boolean; readonly loginStatus: boolean };
   readonly literalExecution: AgentIntegration['literalExecution'];
   readonly singleQueryRunsToolsWithoutPermission: boolean;
+  readonly steeringAcceptsAttachments: boolean;
 }
 
 export type HistoryReaderRef = AgentResourceRef<'history-reader'>;

@@ -565,6 +565,7 @@ function makeService(overrides = {}) {
     supportsForkAtMessage: mock(() => true),
     supportsForkWhileRunning: mock(() => false),
     steeringSupport: mock(() => 'supported'),
+    steeringAcceptsAttachments: mock(() => false),
     supportsUpdateProjectPath: mock(() => true),
     requiresNativePathForProjectPathUpdate: mock((agentId) => agentId === 'pi'),
     isAgentSessionRunning: mock(() => false),
@@ -5746,6 +5747,89 @@ describe('ChatCommandService', () => {
 
     expect(queue.deliverAcceptedQueueEntrySteer).not.toHaveBeenCalled();
     expect(queue.markAcceptedQueueEntrySteer).not.toHaveBeenCalled();
+  });
+
+  it('steers a queued entry with attachments into an agent that takes them', async () => {
+    const image = { data: 'data:image/png;base64,AAAA', name: 'screen.png', mimeType: 'image/png' };
+    const current = storedQueue([
+      queueEntry('entry-image', 'look at this', 'queued', 3, [image]),
+    ], { reorderRevision: 7, version: 5 });
+    const target = {
+      attempt: {},
+      providerTarget: {},
+      identity: { clientRequestId: 'request-active', turnId: 'turn-active' },
+    };
+    const { service, queue } = makeService({
+      agents: { steeringAcceptsAttachments: mock(() => true) },
+      queue: {
+        captureSteerTarget: mock(() => target),
+        readChatExecutionControl: mock(async () => current),
+        deliverAcceptedQueueEntrySteer: mock(async (accepted) => {
+          await accepted.settlement.settleSteerSuccess(accepted.command, 'turn-active');
+          return { turnId: 'turn-active', control: storedQueue([], { reorderRevision: 7 }) };
+        }),
+      },
+    });
+
+    await expect(service.submitQueueEntrySteer({
+      chatId: SOURCE_CHAT_ID,
+      clientRequestId: 'request-queue-steer-image-ok',
+      entryId: 'entry-image',
+      expectedRevision: 3,
+      expectedReorderRevision: 7,
+    })).resolves.toMatchObject({ commandType: 'steer', turnId: 'turn-active' });
+
+    expect(queue.deliverAcceptedQueueEntrySteer).toHaveBeenCalledWith(
+      expect.objectContaining({ content: 'look at this', images: [image] }),
+    );
+  });
+
+  it('refuses steer attachments for an agent that cannot take them', async () => {
+    const { service, queue } = makeService({
+      queue: {
+        captureSteerTarget: mock(() => ({
+          attempt: {},
+          providerTarget: {},
+          identity: { clientRequestId: 'request-active', turnId: 'turn-active' },
+        })),
+      },
+    });
+
+    await expect(service.submitSteer({
+      chatId: SOURCE_CHAT_ID,
+      content: 'read this screenshot',
+      images: [{ data: 'data:image/png;base64,AAAA', name: 'screen.png', mimeType: 'image/png' }],
+      clientRequestId: 'request-steer-image-refused',
+      clientMessageId: 'message-steer-image-refused',
+    })).rejects.toMatchObject({ code: 'OPERATION_UNSUPPORTED', status: 409 });
+
+    expect(queue.deliverAcceptedSteer).not.toHaveBeenCalled();
+  });
+
+  it('delivers steer attachments to an agent that takes them', async () => {
+    const image = { data: 'data:image/png;base64,AAAA', name: 'screen.png', mimeType: 'image/png' };
+    const { service, queue } = makeService({
+      agents: { steeringAcceptsAttachments: mock(() => true) },
+      queue: {
+        captureSteerTarget: mock(() => ({
+          attempt: {},
+          providerTarget: {},
+          identity: { clientRequestId: 'request-active', turnId: 'turn-active' },
+        })),
+      },
+    });
+
+    await expect(service.submitSteer({
+      chatId: SOURCE_CHAT_ID,
+      content: 'read this screenshot',
+      images: [image],
+      clientRequestId: 'request-steer-image',
+      clientMessageId: 'message-steer-image',
+    })).resolves.toMatchObject({ commandType: 'steer', turnId: 'turn-active' });
+
+    expect(queue.deliverAcceptedSteer).toHaveBeenCalledWith(
+      expect.objectContaining({ content: 'read this screenshot', images: [image] }),
+    );
   });
 
   it('does not mask a queued-steer observation rejection when ledger settlement fails', async () => {

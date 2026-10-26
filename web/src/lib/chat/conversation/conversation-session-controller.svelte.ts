@@ -46,6 +46,7 @@ import {
 	submitQueueRoute,
 	submitRunRoute,
 	submitSteerPreferenceRoute,
+	prepareSteerImages,
 	submitSteerRoute,
 } from '$lib/chat/conversation/submission-routes.js';
 import * as m from '$lib/paraglide/messages.js';
@@ -621,7 +622,9 @@ export class ConversationSessionController {
 			composerRevisionAfterClear: null,
 		};
 		if (slash.kind === 'steer') {
-			return submitSteerRoute(deps, this.#acceptedInputs, specializedContext);
+			const images = await prepareSteerImages(deps, chatId, submissionImages);
+			if (!images) return 'rejected';
+			return submitSteerRoute(deps, this.#acceptedInputs, { ...specializedContext, images });
 		}
 		if (isDraft && !startup) return rejectMissingDraftStartup(deps, chatId);
 
@@ -755,6 +758,9 @@ export class ConversationSessionController {
 			supportsSteering: deps
 				.modelCatalogForExecutor(selected.executorId ?? 'local')
 				.supportsSteering(selected.agentId),
+			supportsSteeringAttachments: deps
+				.modelCatalogForExecutor(selected.executorId ?? 'local')
+				.supportsSteeringAttachments(selected.agentId),
 		});
 	}
 

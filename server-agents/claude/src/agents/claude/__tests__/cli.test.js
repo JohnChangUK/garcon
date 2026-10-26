@@ -83,7 +83,7 @@ describe('Claude SDK user input', () => {
 
   it('builds an explicit next-priority steering frame with literal slash input', () => {
     expect(JSON.parse(buildClaudeUserInputFrame({
-      content: buildClaudeSteeringUserContent('/review the failing test'),
+      content: buildClaudeSteeringUserContent('/review the failing test', []),
       sessionId: 'session-1',
       uuid: 'native-steer-1',
       priority: 'next',
@@ -101,6 +101,28 @@ describe('Claude SDK user input', () => {
       uuid: 'native-steer-1',
       priority: 'next',
     });
+  });
+
+  it('puts steering image blocks ahead of the prefixed steering text', () => {
+    const frame = JSON.parse(buildClaudeUserInputFrame({
+      content: buildClaudeSteeringUserContent('read the word in this screenshot', [{
+        kind: 'image',
+        name: 'word.png',
+        mimeType: 'image/png',
+        data: 'data:image/png;base64,iVBORw0KGgo=',
+      }]),
+      sessionId: 'session-1',
+      uuid: 'native-steer-2',
+      priority: 'next',
+    }));
+    expect(frame.priority).toBe('next');
+    expect(frame.message.content).toEqual([
+      { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' } },
+      { type: 'text', text: `${CLAUDE_STEERING_PROMPT_PREFIX}read the word in this screenshot` },
+    ]);
+    expect(claudeSteeringInputsFromNativeContent(frame.message.content))
+      .toEqual(['read the word in this screenshot']);
+    expect(claudeSteeringInputsFromNativeContent([frame.message.content[0]])).toBeNull();
   });
 
   it('extracts only complete provider-owned steering block arrays', () => {

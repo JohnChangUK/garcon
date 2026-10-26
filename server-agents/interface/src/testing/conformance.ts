@@ -74,6 +74,7 @@ export function validateAgentIntegration(
     'loginStatus',
   ]);
   assertSingleQueryOptions(agentId, integrationRecord.singleQuery);
+  assertSteeringOptions(agentId, integrationRecord.steering);
   if (integration.literalExecution && (
     !integration.literalExecution.selectionLabel
     || !isInputFormatByModel(integration.literalExecution.inputFormatByModel)
@@ -162,6 +163,14 @@ function assertSingleQueryOptions(agentId: string, value: unknown): void {
     && record.runsToolsWithoutPermission !== true
   ) {
     throw new Error(`Agent integration ${agentId} has an invalid singleQuery facet`);
+  }
+}
+
+function assertSteeringOptions(agentId: string, value: unknown): void {
+  if (value === null || value === undefined) return;
+  const record = value as Record<string, unknown>;
+  if ('acceptsAttachments' in record && record.acceptsAttachments !== true) {
+    throw new Error(`Agent integration ${agentId} has an invalid steering facet`);
   }
 }
 

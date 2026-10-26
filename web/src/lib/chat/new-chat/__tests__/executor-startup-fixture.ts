@@ -11,7 +11,7 @@ function metadata(id: SessionAgentId, defaultModel: string): AgentMetadata {
 		executionPolicy: 'conversation', selectionLabel: 'Model', inputFormatByModel: {},
 		id, label: id, defaultModel, supportsCompact: false, supportsFork: false,
 		supportsForkAtMessage: false, supportsForkWhileRunning: false,
-		supportsUpdateProjectPath: true, supportsSteering: true, supportsImages: false,
+		supportsUpdateProjectPath: true, supportsSteering: true, supportsSteeringAttachments: false, supportsImages: false,
 		fileAttachmentMimeTypes: [], acceptsApiProviderEndpoints: false, supportedProtocols: [],
 		authLoginSupported: false, supportedPermissionModes: ['default', 'acceptEdits'],
 		supportedThinkingModes: ['none', 'high'], settings: [],

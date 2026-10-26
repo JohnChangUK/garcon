@@ -25,7 +25,7 @@ function conversationalCatalog(): ModelCatalogStore {
 		id: 'claude', label: 'Claude', executionPolicy: 'conversation', defaultModel: 'opus',
 		supportsCompact: false, supportsFork: false, supportsForkAtMessage: false,
 		supportsForkWhileRunning: false, supportsUpdateProjectPath: true,
-		supportsSteering: false, supportsImages: false, fileAttachmentMimeTypes: [],
+		supportsSteering: false, supportsSteeringAttachments: false, supportsImages: false, fileAttachmentMimeTypes: [],
 		acceptsApiProviderEndpoints: false, supportedProtocols: [], authLoginSupported: false,
 		supportedPermissionModes: [], supportedThinkingModes: [], settings: [],
 		defaultSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },

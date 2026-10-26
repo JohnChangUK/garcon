@@ -18,7 +18,7 @@ const catalogBody = {
 			models: [{ value: 'cached', label: 'Cached Model' }],
 			supportsCompact: false, supportsFork: false, supportsForkAtMessage: false,
 			supportsForkWhileRunning: false, supportsUpdateProjectPath: false,
-			supportsSteering: false, supportsImages: false, acceptsApiProviderEndpoints: false,
+			supportsSteering: false, supportsSteeringAttachments: false, supportsImages: false, acceptsApiProviderEndpoints: false,
 			supportedProtocols: [], authLoginSupported: false,
 			supportedPermissionModes: ['default'], supportedThinkingModes: ['none'],
 			settings: [], defaultSettings: { ownerId: 'sample', schemaVersion: 1, values: {} },

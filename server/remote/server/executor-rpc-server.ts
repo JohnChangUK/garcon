@@ -232,6 +232,7 @@ function manifest(integration: AgentIntegration): IntegrationManifest {
       loginStatus: typeof integration.auth?.loginStatus === 'function',
     },
     singleQueryRunsToolsWithoutPermission: integration.singleQuery?.runsToolsWithoutPermission === true,
+    steeringAcceptsAttachments: integration.steering?.acceptsAttachments === true,
   };
 }
 

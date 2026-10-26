@@ -1605,7 +1605,8 @@ The guarantee is durable before provider dispatch, not durable at send:
   process-ephemeral entry and become the `user-input` row's attachments
   at dequeue; public queue state carries only their names and MIME
   types. Replacement edits text only, and a queued entry with
-  attachments cannot steer. Enqueue checks attachment support against
+  attachments steers only an agent whose steering facet sets
+  `acceptsAttachments`, under the same model checks. Enqueue checks attachment support against
   the chat's current selection, and dequeue checks it again inside the
   admission block. A rejected check aborts the dequeue uncommitted and
   pauses the queue on that entry, so the attachments are never dropped

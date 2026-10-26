@@ -207,6 +207,7 @@ function createDeps(chat = createChat()) {
 		supportsFork: vi.fn(() => false),
 		supportsForkWhileRunning: vi.fn(() => false),
 		supportsSteering: vi.fn(() => false),
+		supportsSteeringAttachments: vi.fn(() => false),
 	};
 	const deps = {
 		sessions,

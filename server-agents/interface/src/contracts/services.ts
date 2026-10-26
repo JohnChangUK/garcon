@@ -4,6 +4,7 @@ import type {
   AgentAuthLoginStatus,
 } from '@garcon/common/agent-auth';
 import type {
+  AgentAttachment,
   AgentAuthStatus,
   AgentEndpointSelection,
 } from '@garcon/common/agent-execution';
@@ -87,6 +88,9 @@ export interface AgentCommands {
 export interface AgentSteering {
   captureTarget(request: AgentSteerTargetRequest, options?: ExecutorCallOptions): Promise<AgentSteerTarget | null>;
   steer(request: AgentSteerRequest, options?: ExecutorCallOptions): Promise<AgentSteerResult>;
+  // Present when a steer can carry the same attachments a turn start takes; absent
+  // means core refuses steers with attachments before they reach the agent.
+  readonly acceptsAttachments?: true;
 }
 
 export type AgentSteerTarget = AgentResourceRef<'steer-target'>;
@@ -106,6 +110,7 @@ export interface AgentSteerRequest {
   readonly nativeSession: AgentNativeSessionRef | null;
   readonly target: AgentSteerTarget | null;
   readonly input: string;
+  readonly attachments: readonly AgentAttachment[];
   readonly clientMessageId: string;
 }
 

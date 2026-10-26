@@ -47,7 +47,7 @@ function createForm(
 			selectionLabel: 'Model', inputFormatByModel: {},
 			id, label: id, executionPolicy: catalogOverrides.executionPolicy ?? 'conversation', defaultModel: 'gpt-5',
 			supportsCompact: false, supportsFork: false, supportsForkAtMessage: false,
-			supportsForkWhileRunning: false, supportsUpdateProjectPath: false, supportsSteering: false,
+			supportsForkWhileRunning: false, supportsUpdateProjectPath: false, supportsSteering: false, supportsSteeringAttachments: false,
 			supportsImages: false, fileAttachmentMimeTypes: [], acceptsApiProviderEndpoints: false,
 			supportedProtocols: [], authLoginSupported: false, supportedPermissionModes: ['default'],
 			supportedThinkingModes: ['none'], settings: [], defaultSettings: { ownerId: id, schemaVersion: 1, values: {} },

@@ -177,6 +177,7 @@ export default class CodexAgentIntegration implements AgentIntegration {
     this.steering = createAgentSteering(producer, {
       captureTarget: (agentSessionId) => runtime.captureSteerTarget(agentSessionId),
       steer: (request) => runtime.steer(request),
+      acceptsAttachments: true,
     });
     this.catalog = createModelCatalog({
       logger: host.logger,

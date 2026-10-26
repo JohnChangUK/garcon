@@ -109,6 +109,7 @@ export class ChatExecutionControlOperations {
   async createSteer(
     chatId: string,
     content: string,
+    images: readonly AgentCommandImage[],
     command: QueueCommandIdentity,
     submission: StoredQueueSubmissionIdentity,
   ): Promise<QueueCommandMutationResult> {
@@ -117,7 +118,7 @@ export class ChatExecutionControlOperations {
       const committed = await this.#commitTransition(
         chatId,
         current,
-        createQueuedSteer(current, { content, command, submission }, this.#transitionContext(chatId)),
+        createQueuedSteer(current, { content, images, command, submission }, this.#transitionContext(chatId)),
       );
       const result = committed.value;
       if (!result.duplicate) {

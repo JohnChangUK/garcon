@@ -262,6 +262,7 @@ export class RemoteAgentIntegration implements AgentIntegration {
     this.steering = cap.steering ? {
       captureTarget: (request, options) => call('steering.captureTarget', request, options),
       steer: (request, options) => call('steering.steer', request, options),
+      ...(manifest.steeringAcceptsAttachments ? { acceptsAttachments: true as const } : {}),
     } : null;
     this.endpoints = cap.endpoints ? { validate: (request, options) => call('endpoints.validate', request, options) } : null;
     this.singleQuery = cap.singleQuery ? {

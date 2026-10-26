@@ -39,6 +39,7 @@
 			supportsForkWhileRunning: false,
 			supportsUpdateProjectPath: false,
 			supportsSteering: false,
+			supportsSteeringAttachments: false,
 			supportsImages: false,
 			fileAttachmentMimeTypes: [],
 			acceptsApiProviderEndpoints: false,

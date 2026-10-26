@@ -94,6 +94,7 @@ function makeCatalog(options: { multiEndpointProvider?: boolean } = {}) {
 			supportsForkWhileRunning: false,
 			supportsUpdateProjectPath: true,
 			supportsSteering: false,
+			supportsSteeringAttachments: false,
 			supportsImages: true,
 			fileAttachmentMimeTypes: [],
 			acceptsApiProviderEndpoints: true,

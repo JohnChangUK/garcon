@@ -325,6 +325,7 @@ export class AgentRuntimeRouter {
       nativeSession: entry.nativeSession ?? null,
       target,
       input,
+      attachments: attachments(options.images),
       clientMessageId: options.clientMessageId,
     }, { dispatchDeadline: deadline ?? undefined });
   }

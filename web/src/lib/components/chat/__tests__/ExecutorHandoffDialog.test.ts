@@ -88,7 +88,7 @@ describe('ExecutorHandoffDialog', () => {
 			selectionLabel: 'Model', inputFormatByModel: {},
 			id: 'claude', label: 'Claude', defaultModel: 'opus', executionPolicy: 'conversation',
 			supportsCompact: false, supportsFork: false, supportsForkAtMessage: false,
-			supportsForkWhileRunning: false, supportsUpdateProjectPath: true, supportsSteering: false,
+			supportsForkWhileRunning: false, supportsUpdateProjectPath: true, supportsSteering: false, supportsSteeringAttachments: false,
 			supportsImages: false, fileAttachmentMimeTypes: [], acceptsApiProviderEndpoints: false,
 			supportedProtocols: [], authLoginSupported: false, supportedPermissionModes: [],
 			supportedThinkingModes: [], settings: [], defaultSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },

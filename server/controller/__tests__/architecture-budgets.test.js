@@ -27,7 +27,8 @@ const MAX_LINES = 1000;
 // Literal execution adds exact-source admission, failure pausing,
 // and terminal settlement while keeping shell mechanics in its integration.
 // Compensated startup failures release direct ownership even when their chat no longer exists.
-const EXECUTION_FOOTPRINT_BUDGET = 9280;
+// Steer attachments add the agent capability check and carry images through steer delivery.
+const EXECUTION_FOOTPRINT_BUDGET = 9297;
 
 const GRANDFATHER = {
   'server/runtime/git/diff-engine.ts': 1575,

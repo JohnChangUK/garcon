@@ -101,6 +101,7 @@ export interface AgentRegistryServiceContract {
   supportsForkAtMessage(agentId: string, executorId?: string | null): boolean;
   supportsForkWhileRunning(agentId: string, executorId?: string | null): boolean;
   steeringSupport(agentId: string, executorId?: string | null): SteeringSupport;
+  steeringAcceptsAttachments(agentId: string, executorId?: string | null): boolean;
   supportsUpdateProjectPath(agentId: string, executorId?: string | null): boolean;
   requiresNativePathForProjectPathUpdate(agentId: string, executorId?: string | null): boolean;
   supportsImages(agentId: string, executorId?: string | null): boolean;
@@ -326,6 +327,9 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     const integration = this.#directory.get(agentId, executorId);
     if (!integration) return 'unknown';
     return integration.steering ? 'supported' : 'unsupported';
+  }
+  steeringAcceptsAttachments(agentId: string, executorId?: string | null): boolean {
+    return this.#directory.get(agentId, executorId)?.steering?.acceptsAttachments === true;
   }
   supportsUpdateProjectPath(agentId: string, executorId?: string | null): boolean { return this.#directory.get(agentId, executorId)?.descriptor.supportsProjectPathUpdate ?? false; }
   requiresNativePathForProjectPathUpdate(agentId: string, executorId?: string | null): boolean {

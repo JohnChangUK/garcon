@@ -56,7 +56,8 @@ The controller owns message selection and delivery:
 - Automatic delivery still selects only the first entry and observes queue
   pause. An explicit ready Steer retains its existing ability to act while the
   follow-up queue is paused.
-- Messages with attachments retain the disabled Steer action and its explanation.
+- Messages with attachments keep Steer only for agents whose steering facet
+  accepts attachments; elsewhere the action stays disabled with its explanation.
   Unsupported providers do not expose it. Pending steers show their waiting
   status instead of offering duplicate submission.
 

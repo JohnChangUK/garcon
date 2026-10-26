@@ -125,6 +125,7 @@ export class QueuedSteerDelivery {
           clientRequestId,
           clientMessageId: head.submission.clientMessageId,
           transcriptViewId: head.submission.transcriptViewId,
+          images: entry.images.map((image) => ({ ...image })),
         },
         target,
         async () => { admitted = true; },

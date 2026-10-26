@@ -367,6 +367,7 @@ export interface SteerCommandRequest {
   chatId: string;
   transcriptViewId: string;
   content: string;
+  images?: AgentCommandImage[];
   userMessagePresentation?: UserMessagePresentation;
   whenTurnUnavailable?: SteerUnavailableTurnPolicy;
 }
@@ -821,6 +822,7 @@ export function parseQueueEntryMoveCommandRequest(value: unknown): QueueEntryMov
 
 export function parseSteerCommandRequest(value: unknown): SteerCommandRequest {
   const body = requestRecord(value);
+  const images = optionalImages(body.images);
   const userMessagePresentation = parseCommandUserMessagePresentation(body.userMessagePresentation);
   if (
     body.whenTurnUnavailable !== undefined
@@ -839,6 +841,7 @@ export function parseSteerCommandRequest(value: unknown): SteerCommandRequest {
     chatId: requiredChatId(body, 'chatId'),
     transcriptViewId: requiredString(body, 'transcriptViewId'),
     content: requiredContent(body, 'content'),
+    ...(images === undefined ? {} : { images }),
     ...(userMessagePresentation === undefined ? {} : { userMessagePresentation }),
     ...(body.whenTurnUnavailable === undefined ? {} : { whenTurnUnavailable: body.whenTurnUnavailable }),
   };

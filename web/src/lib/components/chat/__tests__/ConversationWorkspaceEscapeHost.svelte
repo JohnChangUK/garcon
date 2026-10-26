@@ -204,7 +204,7 @@
 			inputFormatByModel: {},
 			id, label: id, executionPolicy, defaultModel: 'sonnet',
 			supportsCompact: false, supportsFork: true, supportsForkAtMessage: true,
-			supportsForkWhileRunning: true, supportsUpdateProjectPath: true, supportsSteering: true,
+			supportsForkWhileRunning: true, supportsUpdateProjectPath: true, supportsSteering: true, supportsSteeringAttachments: false,
 			supportsImages: false, fileAttachmentMimeTypes: [], acceptsApiProviderEndpoints: false,
 			supportedProtocols: [], authLoginSupported: false, supportedPermissionModes: [],
 			supportedThinkingModes: [], settings: [], defaultSettings: { ownerId: id, schemaVersion: 1, values: {} },
@@ -231,6 +231,7 @@
 		supportsFork: () => true,
 		supportsForkWhileRunning: () => true,
 		supportsSteering: (agentId: string) => agentId === 'claude' || agentId === 'codex',
+		supportsSteeringAttachments: (agentId: string) => agentId === 'claude',
 	} as never);
 
 	const workspaceInteractionGate = new WorkspaceInteractionGate();

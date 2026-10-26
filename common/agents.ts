@@ -52,6 +52,7 @@ export interface AgentCatalogEntry {
   supportsForkWhileRunning: boolean;
   supportsUpdateProjectPath: boolean;
   supportsSteering: boolean;
+  supportsSteeringAttachments: boolean;
   supportsImages: boolean;
   fileAttachmentMimeTypes?: FileAttachmentMimeTypes;
   acceptsApiProviderEndpoints: boolean;

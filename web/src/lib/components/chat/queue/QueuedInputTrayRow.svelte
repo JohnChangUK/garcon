@@ -51,6 +51,7 @@
 		deleting: boolean;
 		announcementsEnabled: boolean;
 		canSteer: boolean;
+		canSteerAttachments: boolean;
 		canInterrupt: boolean;
 		onEdit: () => void;
 		onDelete: () => void;
@@ -74,6 +75,7 @@
 		deleting,
 		announcementsEnabled,
 		canSteer,
+		canSteerAttachments,
 		canInterrupt,
 		onEdit,
 		onDelete,
@@ -103,7 +105,8 @@
 	const attachmentNames = $derived(
 		entry.attachments.map((attachment) => attachment.name).join(', '),
 	);
-	const steerBlocked = $derived(blocked || entry.attachments.length > 0);
+	const attachmentsBlockSteer = $derived(entry.attachments.length > 0 && !canSteerAttachments);
+	const steerBlocked = $derived(blocked || attachmentsBlockSteer);
 	const iconButtonClass =
 		'grid size-11 shrink-0 place-items-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 sm:pointer-fine:size-8';
 	$effect(() => {
@@ -257,7 +260,7 @@
 					disabled={steerBlocked}
 					aria-busy={steering || undefined}
 					aria-label={m.chat_queue_steer()}
-					title={entry.attachments.length > 0
+					title={attachmentsBlockSteer
 						? m.chat_queue_steer_attachments_unavailable()
 						: m.chat_queue_steer_queue()}
 					class="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 rounded-lg px-0 text-xs font-medium @min-[30rem]/queue-row:px-2 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 sm:pointer-fine:min-h-8 sm:pointer-fine:min-w-8"

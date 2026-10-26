@@ -690,7 +690,7 @@ function createDeps(chat = createRunningChat()) {
 				id, label: id, executionPolicy: 'conversation', defaultModel: '',
 				supportsCompact: false, supportsFork: true, supportsForkAtMessage: true,
 				supportsForkWhileRunning: false, supportsUpdateProjectPath: true,
-				supportsSteering: true, supportsImages: true, fileAttachmentMimeTypes: [],
+				supportsSteering: true, supportsSteeringAttachments: false, supportsImages: true, fileAttachmentMimeTypes: [],
 				acceptsApiProviderEndpoints: false, supportedProtocols: [], authLoginSupported: false,
 				supportedPermissionModes: ['default'], supportedThinkingModes: ['none'], settings: [],
 				defaultSettings: { ownerId: id, schemaVersion: 1, values: {} },
@@ -733,6 +733,7 @@ function createDeps(chat = createRunningChat()) {
 			supportsSteering: vi.fn(
 				(agentId: string) => agentId === 'claude' || agentId === 'codex' || agentId === 'amp',
 			),
+			supportsSteeringAttachments: vi.fn((agentId: string) => agentId === 'claude'),
 		},
 		modelCatalogForExecutor(): SessionControllerDeps['modelCatalog'] {
 			return this.modelCatalog;
@@ -4065,7 +4066,7 @@ describe('ConversationSessionController', () => {
 				selectionLabel: 'Model', inputFormatByModel: { variant: 'markdown' },
 				id, label: 'Literal test', executionPolicy: 'literal', defaultModel: 'variant',
 				supportsCompact: false, supportsFork: false, supportsForkAtMessage: false,
-				supportsForkWhileRunning: false, supportsUpdateProjectPath: false, supportsSteering: false,
+				supportsForkWhileRunning: false, supportsUpdateProjectPath: false, supportsSteering: false, supportsSteeringAttachments: false,
 				supportsImages: false, fileAttachmentMimeTypes: [], acceptsApiProviderEndpoints: false,
 				supportedProtocols: [], authLoginSupported: false, supportedPermissionModes: [],
 				supportedThinkingModes: [], settings: [], defaultSettings: { ownerId: id, schemaVersion: 1, values: {} },

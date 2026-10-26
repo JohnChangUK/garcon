@@ -282,7 +282,7 @@ export class ClaudeSteeringController {
     try {
       const nativeInputId = crypto.randomUUID();
       const frame = buildClaudeUserInputFrame({
-        content: buildClaudeSteeringUserContent(request.input),
+        content: buildClaudeSteeringUserContent(request.input, request.attachments),
         sessionId: captured.session.id,
         uuid: nativeInputId,
         priority: 'next',

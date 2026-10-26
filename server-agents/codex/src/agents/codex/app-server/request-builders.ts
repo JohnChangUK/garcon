@@ -300,7 +300,7 @@ export function buildTurnStartParams(request: {
   return params;
 }
 
-function commandWithAttachmentPaths(command: string, filePaths?: string[]): string {
+export function commandWithAttachmentPaths(command: string, filePaths?: string[]): string {
   if (!filePaths?.length) return command;
   const attachmentList = filePaths.map((filePath) => `- ${filePath}`).join('\n');
   return [

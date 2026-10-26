@@ -191,4 +191,5 @@ export interface AgentSteerOptions {
   readonly clientRequestId: string;
   readonly clientMessageId: string;
   readonly transcriptViewId: string;
+  readonly images?: AgentCommandImage[];
 }

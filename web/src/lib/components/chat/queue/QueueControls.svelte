@@ -18,6 +18,7 @@
 		queue: ChatQueueState | null;
 		canInterrupt?: boolean;
 		canSteer?: boolean;
+		canSteerAttachments?: boolean;
 		onInterrupt?: () => void | Promise<void>;
 		onSteer?: (entry: QueueEntry, expectedReorderRevision: number) => void | Promise<void>;
 		onPause: () => Promise<void>;
@@ -43,6 +44,7 @@
 		queue,
 		canInterrupt = false,
 		canSteer = false,
+		canSteerAttachments = false,
 		onInterrupt,
 		onSteer,
 		onPause,
@@ -249,6 +251,7 @@
 							{announcementsEnabled}
 							deleting={mutation?.kind === 'deleting' && mutation.entryId === entry.id}
 							canSteer={canSteer && entry.kind !== 'steer' && Boolean(onSteer)}
+							{canSteerAttachments}
 							canInterrupt={index === 0 && canInterrupt && !queue.pause && Boolean(onInterrupt)}
 							onSteer={() => {
 								if (onSteer && queue && entries.some((candidate) => candidate.id === entry.id)) {

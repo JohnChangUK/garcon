@@ -230,6 +230,7 @@ export default class ClaudeAgentIntegration implements AgentIntegration {
     this.steering = createAgentSteering(producer, {
       captureTarget: (agentSessionId) => runtime.captureSteerTarget(agentSessionId),
       steer: (request) => runtime.steer(request),
+      acceptsAttachments: true,
     });
     this.endpoints = {
       async validate(selection) {

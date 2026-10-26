@@ -50,6 +50,45 @@ test('a full steering table rejects without arming an orphaned timer', async () 
   }
 });
 
+test('steering refuses attachments unless the runtime takes them mid-turn', async () => {
+  const runtime = {
+    async start() { return { agentSessionId: 'native', nativeSession: null, nativeSeedReceipt: null }; },
+    async resume() {}, async abort() { return true; }, runningSessions() { return []; },
+  } satisfies AgentRuntimeExecution;
+  const producer = createAgentProducerAdapter(runtime, { scope, logger: { debug() {}, info() {}, warn() {}, error() {} } });
+  const producerBinding = createAgentResourceRef(scope, 'producer');
+  await producer.producers.bind({ binding: producerBinding, chatId: 'chat' });
+  const request = {
+    chatId: 'chat', runId: 'run', agentSessionId: 'native', nativeSession: null,
+    producerBinding, projectPath: '/project', model: 'model', permissionMode: 'default',
+    thinkingMode: 'none', settings: { ownerId: 'test', schemaVersion: 1, values: {} },
+    endpoint: null, prompt: 'input', attachments: [],
+  } satisfies AgentResumeRequestV5;
+  await producer.execution.resume(request);
+  const image = { kind: 'image', data: 'data:image/png;base64,AAAA', name: 'word.png', mimeType: 'image/png' } as const;
+  const steerWith = async (acceptsAttachments: boolean) => {
+    const delivered: unknown[] = [];
+    const steering = createAgentSteering(producer, {
+      captureTarget: () => ({}),
+      async steer(steer) { delivered.push(steer.attachments); return { kind: 'accepted' }; },
+      ...(acceptsAttachments ? { acceptsAttachments: true as const } : {}),
+    });
+    const target = await steering.captureTarget({ ...request, expectedRunId: 'run' });
+    const result = await steering.steer({
+      chatId: 'chat', projectPath: '/project', agentSessionId: 'native', nativeSession: null,
+      target, input: 'read this', attachments: [image], clientMessageId: 'message',
+    });
+    return { result, delivered, facet: steering.acceptsAttachments };
+  };
+
+  expect(await steerWith(false)).toMatchObject({
+    result: { kind: 'rejected', reason: 'invalid-input' }, delivered: [], facet: undefined,
+  });
+  expect(await steerWith(true)).toMatchObject({
+    result: { kind: 'accepted' }, delivered: [[image]], facet: true,
+  });
+});
+
 test.each([
   'SESSION_BUSY', 'SESSION_NOT_FOUND', 'OPERATION_UNSUPPORTED',
   'TRANSCRIPT_UNAVAILABLE', 'PROJECT_PATH_DESTINATION_REJECTED',
